@@ -6,10 +6,11 @@
   --color-surface: #fffdf9;
   --color-surface-muted: #efeade;
 
-  /* Sage green — primary brand */
-  --color-primary: #2f6f5f;
-  --color-primary-dark: #234f43;
-  --color-primary-soft: #e2ede7;
+  /* Muted by default — sensory-sensitive users get a low-arousal baseline.
+     Full brand green only kicks in under the "High contrast" preference below. */
+  --color-primary: #6e6a5e;
+  --color-primary-dark: #524f46;
+  --color-primary-soft: #e6e3d8;
 
   --color-text: #26302b;
   --color-text-muted: #6d766e;
@@ -79,6 +80,27 @@ a:focus-visible {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* "High contrast / reduced motion" preference toggle — set on <html> by App.vue.
+   Opting in restores the full-saturation brand green in place of the muted default above. */
+:root[data-contrast="true"] {
+  --color-primary: #2a6656;
+  --color-primary-dark: #1a4437;
+  --color-primary-soft: #dcece5;
+
+  --color-text-muted: #3c453e;
+  --color-text-faint: #5c655e;
+  --color-border: #b7ae94;
+
+  --color-low: #1c6b4f;
+  --color-medium: #7a5711;
+  --color-high: #8f3e28;
+}
+
+[data-contrast="true"] * {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
 }
 
 /* Route transition — used by App.vue */

@@ -74,10 +74,21 @@ function startCalmRoute() {
         <h2>{{ option.name }}</h2>
         <p>{{ option.description }}</p>
 
+        <div v-if="option.factors?.length" class="factor-chips">
+          <span v-for="factor in option.factors" :key="factor.label" class="factor-chip">
+            <Icon :name="factor.icon" :size="12" />
+            {{ factor.label }}
+          </span>
+        </div>
+
         <div class="route-card-bottom">
           <span class="duration">
             <Icon name="clock" :size="14" />
             {{ option.duration }}
+          </span>
+          <span v-if="option.transit" class="transit-tag">
+            <Icon name="train" :size="13" />
+            {{ option.transit.walk }} to {{ option.transit.stop }}
           </span>
           <span v-if="option.footnote" class="footnote">{{ option.footnote }}</span>
         </div>
@@ -228,10 +239,34 @@ function startCalmRoute() {
   line-height: 1.55;
 }
 
+.factor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  margin-top: 11px;
+}
+
+.factor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+
+  padding: 5px 10px;
+
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-pill);
+
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .route-card-bottom {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 8px 14px;
 
   margin-top: 13px;
 }
@@ -243,6 +278,16 @@ function startCalmRoute() {
 
   color: var(--color-text-muted);
   font-size: 12.5px;
+  font-weight: 600;
+}
+
+.transit-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+
+  color: var(--color-primary);
+  font-size: 12px;
   font-weight: 600;
 }
 

@@ -11,6 +11,8 @@ const mockRouteOptions = [
     duration: "18 min",
     footnote: "Calmest route",
     recommended: true,
+    factors: [],
+    transit: { stop: "Flinders Street Station", type: "train", walk: "4 min" },
   },
   {
     id: "balanced-collins",
@@ -20,6 +22,8 @@ const mockRouteOptions = [
     name: "Balanced Route via Collins St",
     description: "Slightly busy intersection near retail zone. Medium pace.",
     duration: "14 min",
+    factors: [{ icon: "users", label: "Moderate pedestrian volume" }],
+    transit: { stop: "Collins St/Elizabeth St", type: "tram", walk: "2 min" },
   },
   {
     id: "direct-bourke",
@@ -29,6 +33,11 @@ const mockRouteOptions = [
     name: "Direct Route via Bourke St Mall",
     description: "High tram noise, street performances, very dense crowds.",
     duration: "12 min",
+    factors: [
+      { icon: "users", label: "Very dense crowds" },
+      { icon: "megaphone", label: "Street performances" },
+    ],
+    transit: { stop: "Melbourne Central Station", type: "train", walk: "3 min" },
   },
 ];
 

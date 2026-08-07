@@ -1,29 +1,68 @@
 <script setup>
-import { ref, watch, onMounted } from "vue";
-import { useRoute } from "vue-router";
+import { ref, computed, watch, onMounted } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import ProgressBar from "../components/ProgressBar.vue";
-import { getRouteDetail, getQuietSpaces, getSensoryAlert } from "../services/map";
+import { getRouteDetail, getQuietSpaces, getSensoryAlert, getForecast } from "../services/map";
+import { usePreferences, toggleValue } from "../composables/usePreferences";
 
 const route = useRoute();
+const router = useRouter();
+const preferences = usePreferences();
 
 const activeRoute = ref(null);
 const quietSpaces = ref([]);
 const alert = ref(null);
+const forecast = ref(null);
 const alertDismissed = ref(false);
 const loading = ref(true);
+
+// "Always show refuge spaces" preference — when off, quiet-space markers stay off the map.
+const showRefuges = computed(() => toggleValue(preferences, "refuges", true));
+
+// How much crowding the user can tolerate before a route counts as "too busy" —
+// derived from their crowd-sensitivity preference (0 low sensitivity/high tolerance
+// … 2 high sensitivity/low tolerance).
+const crowdTolerance = computed(() => {
+  const crowdSlider = preferences.sliders.find((slider) => slider.key === "crowd");
+  return crowdSlider ? 2 - crowdSlider.value : 2;
+});
+const levelRank = { low: 0, medium: 1, high: 2 };
+
+const crowdExceeded = computed(
+  () => !!activeRoute.value && levelRank[activeRoute.value.level] > crowdTolerance.value
+);
+
+// Prioritise a personalised "this route is busier than you like" banner over the
+// generic conditions alert — both drive users toward the calmer alternativeId route.
+const activeBanner = computed(() => {
+  if (alertDismissed.value) return null;
+  if (crowdExceeded.value) {
+    return {
+      title: "This route is busier than your comfort setting",
+      message: "Your crowd sensitivity preference suggests a calmer path is available.",
+    };
+  }
+  if (alert.value) return alert.value;
+  return null;
+});
 
 async function loadMap() {
   const routeId = route.query.route;
   loading.value = true;
   alertDismissed.value = false;
-  [activeRoute.value, quietSpaces.value, alert.value] = await Promise.all([
+  const [routeDetail, spaces, sensoryAlert, sensoryForecast] = await Promise.all([
     getRouteDetail(routeId),
     getQuietSpaces(routeId),
     getSensoryAlert(routeId),
+    getForecast(routeId),
   ]);
+  activeRoute.value = routeDetail;
+  quietSpaces.value = spaces;
+  alert.value = sensoryAlert;
+  forecast.value = sensoryForecast;
   loading.value = false;
 }
 
@@ -31,29 +70,43 @@ onMounted(loadMap);
 watch(() => route.query.route, loadMap);
 
 function reroute() {
-  alertDismissed.value = true;
+  if (activeRoute.value?.alternativeId) {
+    router.push({ path: "/map", query: { route: activeRoute.value.alternativeId } });
+  } else {
+    alertDismissed.value = true;
+  }
 }
 </script>
 
 <template>
   <PageShell>
     <transition name="fade">
-      <div v-if="alert && !alertDismissed" class="alert-banner">
+      <div v-if="activeBanner" class="alert-banner">
         <div class="alert-text">
           <Icon class="alert-icon" name="alert" :size="18" />
 
           <div>
-            <strong>{{ alert.title }}</strong>
-            <p>{{ alert.message }}</p>
+            <strong>{{ activeBanner.title }}</strong>
+            <p>{{ activeBanner.message }}</p>
           </div>
         </div>
 
         <button class="reroute-button" @click="reroute">
           <Icon name="refresh" :size="13" />
-          Reroute
+          {{ activeRoute?.alternativeId ? "Take calmer route" : "Dismiss" }}
         </button>
       </div>
     </transition>
+
+    <div v-if="forecast" class="forecast-banner">
+      <Icon class="forecast-icon" name="trendingUp" :size="18" />
+
+      <div>
+        <strong>Likely busy in {{ forecast.etaMinutesStart }}–{{ forecast.etaMinutesEnd }} min: {{ forecast.area }}</strong>
+        <p>{{ forecast.message }}</p>
+        <p class="forecast-disclaimer">Estimate based on available pedestrian data — actual conditions may vary.</p>
+      </div>
+    </div>
 
     <div class="map-area">
       <div class="map-grid"></div>
@@ -72,15 +125,17 @@ function reroute() {
           <span class="dot"></span>
         </div>
 
-        <div
-          v-for="space in quietSpaces"
-          :key="space.id"
-          class="map-marker refuge"
-          :style="{ top: space.top, left: space.left }"
-        >
-          <span class="pin"><Icon name="tent" :size="14" /></span>
-          <span class="pin-label">{{ space.label }}</span>
-        </div>
+        <template v-if="showRefuges">
+          <div
+            v-for="space in quietSpaces"
+            :key="space.id"
+            class="map-marker refuge"
+            :style="{ top: space.top, left: space.left }"
+          >
+            <span class="pin"><Icon name="tent" :size="14" /></span>
+            <span class="pin-label">{{ space.label }}</span>
+          </div>
+        </template>
       </template>
     </div>
 
@@ -125,13 +180,18 @@ function reroute() {
           <span class="stat-label">Quiet spaces</span>
           <strong class="stat-value">{{ quietSpaces.length }}</strong>
         </div>
-        <div class="stat">
-          <span class="stat-label">Wayfinding</span>
-          <strong class="stat-value stat-value-tag">
-            <Icon name="sun" :size="13" />
-            Sunflower
-          </strong>
-        </div>
+      </div>
+
+      <div v-if="activeRoute.transit" class="transit-row">
+        <Icon name="train" :size="15" />
+        <span>{{ activeRoute.transit.walk }} walk to {{ activeRoute.transit.stop }}</span>
+      </div>
+
+      <div v-if="activeRoute.factors?.length" class="factor-chips">
+        <span v-for="factor in activeRoute.factors" :key="factor.label" class="factor-chip">
+          <Icon :name="factor.icon" :size="13" />
+          {{ factor.label }}
+        </span>
       </div>
     </section>
   </PageShell>
@@ -204,6 +264,90 @@ function reroute() {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+.forecast-banner {
+  display: flex;
+  align-items: flex-start;
+
+  gap: 11px;
+  padding: 15px 16px;
+
+  margin-top: 12px;
+
+  background: var(--color-primary-soft);
+  border: 1px solid #d3e3da;
+  border-radius: var(--radius-md);
+}
+
+.forecast-icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+
+  color: var(--color-primary-dark);
+}
+
+.forecast-banner strong {
+  display: block;
+
+  color: var(--color-primary-dark);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.forecast-banner p {
+  margin: 3px 0 0;
+
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.forecast-disclaimer {
+  color: var(--color-text-faint);
+  font-size: 10.5px;
+  font-style: italic;
+}
+
+.transit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  margin-top: 16px;
+  padding-top: 16px;
+
+  border-top: 1px solid var(--color-border);
+
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.transit-row :deep(.sl-icon) {
+  color: var(--color-primary);
+}
+
+.factor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  margin-top: 12px;
+}
+
+.factor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 6px 11px;
+
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-pill);
+
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
 }
 
 .map-area {
@@ -434,15 +578,6 @@ function reroute() {
   color: var(--color-text);
   font-size: 15px;
   font-weight: 700;
-}
-
-.stat-value-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-
-  color: var(--color-primary);
-  font-size: 13px;
 }
 
 .skeleton-stat-grid {

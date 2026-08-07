@@ -4,17 +4,16 @@ import { useRouter } from "vue-router";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
-import { getCbdStatus, getSavedRoutes } from "../services/home";
+import { getCbdStatus } from "../services/home";
 
 const router = useRouter();
 const destination = ref("");
 
 const cbdStatus = ref(null);
-const savedRoutes = ref([]);
 const loading = ref(true);
 
 onMounted(async () => {
-  [cbdStatus.value, savedRoutes.value] = await Promise.all([getCbdStatus(), getSavedRoutes()]);
+  cbdStatus.value = await getCbdStatus();
   loading.value = false;
 });
 
@@ -93,26 +92,6 @@ function findCalmRoute() {
       </div>
 
       <aside class="side-column">
-        <section class="saved-section">
-          <h2>SAVED ROUTES</h2>
-
-          <div v-if="loading" class="saved-routes">
-            <SkeletonBlock width="128px" height="38px" radius="999px" />
-            <SkeletonBlock width="128px" height="38px" radius="999px" />
-          </div>
-          <div v-else class="saved-routes">
-            <button
-              v-for="route in savedRoutes"
-              :key="route.label"
-              class="route-pill"
-              @click="router.push({ path: '/routes', query: { destination: route.destination } })"
-            >
-              <Icon name="heart" :size="15" />
-              {{ route.label }}
-            </button>
-          </div>
-        </section>
-
         <section class="info-card">
           <span class="info-label">Plan ahead</span>
           <h3>Travel when conditions feel calmer</h3>
@@ -316,47 +295,6 @@ function findCalmRoute() {
   margin-top: 28px;
 }
 
-.saved-section h2 {
-  margin: 0 0 12px;
-
-  color: var(--color-text-muted);
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-.saved-routes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.route-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  padding: 11px 15px;
-
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
-
-  color: var(--color-text);
-  font-size: 12.5px;
-  font-weight: 600;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.route-pill:hover {
-  background: var(--color-primary-soft);
-  border-color: var(--color-primary-soft);
-}
-
-.route-pill :deep(.sl-icon) {
-  color: var(--color-primary);
-}
-
 .info-card {
   display: none;
 }
@@ -475,23 +413,9 @@ function findCalmRoute() {
     margin-top: 0;
   }
 
-  .saved-routes {
-    flex-direction: column;
-  }
-
-  .route-pill {
-    width: 100%;
-    justify-content: flex-start;
-
-    padding: 13px 16px;
-
-    border-radius: var(--radius-sm);
-  }
-
   .info-card {
     display: block;
 
-    margin-top: 26px;
     padding: 24px;
 
     background: var(--color-surface);

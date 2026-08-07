@@ -1,18 +1,8 @@
 import { delay } from "./http";
 
 const defaultPreferences = {
-  sliders: [
-    { key: "noise", label: "Noise sensitivity", value: 1 },
-    { key: "crowd", label: "Crowd sensitivity", value: 0 },
-    { key: "light", label: "Bright light sensitivity", value: 2 },
-  ],
+  sliders: [{ key: "crowd", label: "Crowd sensitivity", value: 0 }],
   toggles: [
-    {
-      key: "construction",
-      label: "Avoid construction zones",
-      note: "Steer routes away from sudden loud sounds or dust.",
-      value: true,
-    },
     {
       key: "refuges",
       label: "Always show refuge spaces",
@@ -23,7 +13,7 @@ const defaultPreferences = {
       key: "contrast",
       label: "High contrast / reduced motion mode",
       note: "Use stronger colors and fewer animations for comfort.",
-      value: true,
+      value: false,
     },
   ],
 };

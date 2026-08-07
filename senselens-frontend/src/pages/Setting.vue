@@ -1,21 +1,16 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, computed } from "vue";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
-import { getPreferences, savePreferences as savePreferencesRequest } from "../services/preferences";
+import { savePreferences as savePreferencesRequest } from "../services/preferences";
+import { usePreferences } from "../composables/usePreferences";
 
-const sliders = ref([]);
-const toggles = ref([]);
+const preferences = usePreferences();
+const sliders = computed(() => preferences.sliders);
+const toggles = computed(() => preferences.toggles);
 const levelLabels = ["Low", "Medium", "High"];
-const loading = ref(true);
-
-onMounted(async () => {
-  const preferences = await getPreferences();
-  sliders.value = preferences.sliders;
-  toggles.value = preferences.toggles;
-  loading.value = false;
-});
+const loading = computed(() => !preferences.ready);
 
 const saved = ref(false);
 const saving = ref(false);
@@ -23,7 +18,7 @@ let savedTimeout;
 
 async function savePreferences() {
   saving.value = true;
-  await savePreferencesRequest({ sliders: sliders.value, toggles: toggles.value });
+  await savePreferencesRequest({ sliders: preferences.sliders, toggles: preferences.toggles });
   saving.value = false;
 
   saved.value = true;
