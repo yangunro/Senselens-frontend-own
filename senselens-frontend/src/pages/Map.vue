@@ -22,6 +22,21 @@ const loading = ref(true);
 
 const MELBOURNE_CBD = { lat: -37.8136, lng: 144.9631 };
 
+// A calm, round marker for refuge/quiet-space pins — Google's default red teardrop
+// pin reads as an alert, which fights the "this is a safe, calming spot" message.
+const REFUGE_ICON_URL =
+  "data:image/svg+xml;charset=UTF-8," +
+  encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34">
+      <circle cx="17" cy="17" r="14" fill="#fffdf9" stroke="#2f6f5f" stroke-width="2"/>
+      <g transform="translate(9,9)" stroke="#2f6f5f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <path d="M8 2 2 14h12L8 2Z"/>
+        <line x1="6" y1="14" x2="8" y2="9"/>
+        <line x1="10" y1="14" x2="8" y2="9"/>
+      </g>
+    </svg>
+  `);
+
 const mapEl = ref(null);
 const mapReady = ref(false);
 const mapError = ref(false);
@@ -97,6 +112,11 @@ function renderMapLayer() {
           position: { lat: space.lat, lng: space.lng },
           map,
           title: space.label,
+          icon: {
+            url: REFUGE_ICON_URL,
+            scaledSize: new google.maps.Size(34, 34),
+            anchor: new google.maps.Point(17, 17),
+          },
         })
     );
   }
