@@ -11,6 +11,12 @@ const mockRouteDetails = {
     factors: [],
     transit: { stop: "Flinders Street Station", type: "train", walk: "4 min" },
     alternativeId: null,
+    // Illustrative waypoints (not a real routed path) — plotted on the Google Map.
+    path: [
+      { lat: -37.8183, lng: 144.9671 }, // Flinders Street Station
+      { lat: -37.814, lng: 144.9663 },
+      { lat: -37.8099, lng: 144.9656 }, // near State Library Victoria
+    ],
   },
   "balanced-collins": {
     name: "Balanced Route",
@@ -22,6 +28,11 @@ const mockRouteDetails = {
     factors: [{ icon: "users", label: "Moderate pedestrian volume near retail zone" }],
     transit: { stop: "Collins St/Elizabeth St", type: "tram", walk: "2 min" },
     alternativeId: "quiet-flinders",
+    path: [
+      { lat: -37.8183, lng: 144.9671 }, // Flinders Street Station
+      { lat: -37.8168, lng: 144.965 },
+      { lat: -37.8155, lng: 144.9631 }, // Collins St / Elizabeth St
+    ],
   },
   "direct-bourke": {
     name: "Direct Route",
@@ -36,6 +47,11 @@ const mockRouteDetails = {
     ],
     transit: { stop: "Melbourne Central Station", type: "train", walk: "3 min" },
     alternativeId: "quiet-flinders",
+    path: [
+      { lat: -37.8183, lng: 144.9671 }, // Flinders Street Station
+      { lat: -37.8145, lng: 144.966 },
+      { lat: -37.8103, lng: 144.9628 }, // Bourke St Mall / Melbourne Central
+    ],
   },
 };
 
@@ -58,9 +74,9 @@ const mockForecasts = {
 };
 
 const mockQuietSpaces = [
-  { id: 1, label: "Quiet space", top: "22%", left: "62%" },
-  { id: 2, label: "Quiet space", top: "48%", left: "82%" },
-  { id: 3, label: "Quiet space", top: "68%", left: "18%" },
+  { id: 1, label: "State Library Victoria", lat: -37.8099, lng: 144.9656 },
+  { id: 2, label: "Flagstaff Gardens", lat: -37.8095, lng: 144.9531 },
+  { id: 3, label: "Treasury Gardens", lat: -37.8115, lng: 144.9793 },
 ];
 
 const mockAlert = {

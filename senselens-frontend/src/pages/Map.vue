@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
@@ -18,6 +19,95 @@ const alert = ref(null);
 const forecast = ref(null);
 const alertDismissed = ref(false);
 const loading = ref(true);
+
+const MELBOURNE_CBD = { lat: -37.8136, lng: 144.9631 };
+
+const mapEl = ref(null);
+const mapReady = ref(false);
+const mapError = ref(false);
+let map = null;
+let startMarker = null;
+let refugeMarkers = [];
+let routePolyline = null;
+
+setOptions({ key: import.meta.env.VITE_GOOGLE_MAPS_API_KEY, v: "weekly" });
+
+async function initMap() {
+  try {
+    const { Map } = await importLibrary("maps");
+    await importLibrary("marker");
+    map = new Map(mapEl.value, {
+      center: MELBOURNE_CBD,
+      zoom: 15,
+      disableDefaultUI: true,
+      zoomControl: true,
+      clickableIcons: false,
+    });
+    mapReady.value = true;
+    renderMapLayer();
+  } catch (err) {
+    console.error("Google Maps failed to load", err);
+    mapError.value = true;
+  }
+}
+
+function clearRefugeMarkers() {
+  refugeMarkers.forEach((marker) => marker.setMap(null));
+  refugeMarkers = [];
+}
+
+function renderMapLayer() {
+  if (!map || !activeRoute.value) return;
+
+  const path = activeRoute.value.path ?? [];
+
+  routePolyline?.setMap(null);
+  if (path.length) {
+    routePolyline = new google.maps.Polyline({
+      path,
+      strokeColor: "#2f6f5f",
+      strokeWeight: 5,
+      strokeOpacity: 0.85,
+      map,
+    });
+  }
+
+  startMarker?.setMap(null);
+  if (path.length) {
+    startMarker = new google.maps.Marker({
+      position: path[0],
+      map,
+      title: "Start",
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: "#2f6f5f",
+        fillOpacity: 1,
+        strokeColor: "#fffdf9",
+        strokeWeight: 3,
+      },
+    });
+  }
+
+  clearRefugeMarkers();
+  if (showRefuges.value) {
+    refugeMarkers = quietSpaces.value.map(
+      (space) =>
+        new google.maps.Marker({
+          position: { lat: space.lat, lng: space.lng },
+          map,
+          title: space.label,
+        })
+    );
+  }
+
+  const bounds = new google.maps.LatLngBounds();
+  path.forEach((point) => bounds.extend(point));
+  if (showRefuges.value) {
+    quietSpaces.value.forEach((space) => bounds.extend({ lat: space.lat, lng: space.lng }));
+  }
+  if (!bounds.isEmpty()) map.fitBounds(bounds, 48);
+}
 
 // "Always show refuge spaces" preference — when off, quiet-space markers stay off the map.
 const showRefuges = computed(() => toggleValue(preferences, "refuges", true));
@@ -64,10 +154,21 @@ async function loadMap() {
   alert.value = sensoryAlert;
   forecast.value = sensoryForecast;
   loading.value = false;
+  renderMapLayer();
 }
 
-onMounted(loadMap);
+onMounted(async () => {
+  await initMap();
+  await loadMap();
+});
 watch(() => route.query.route, loadMap);
+watch(showRefuges, renderMapLayer);
+
+onBeforeUnmount(() => {
+  clearRefugeMarkers();
+  routePolyline?.setMap(null);
+  startMarker?.setMap(null);
+});
 
 function reroute() {
   if (activeRoute.value?.alternativeId) {
@@ -109,34 +210,16 @@ function reroute() {
     </div>
 
     <div class="map-area">
-      <div class="map-grid"></div>
+      <div ref="mapEl" class="map-canvas"></div>
 
-      <div v-if="loading" class="map-loading">
+      <div v-if="loading || !mapReady" class="map-loading">
         <span class="map-loading-dot"></span>
         Finding your calm route…
       </div>
 
-      <template v-else>
-        <svg class="map-path" viewBox="0 0 300 340" preserveAspectRatio="none">
-          <path d="M 40 40 L 40 200 L 220 200" fill="none" stroke="var(--color-primary)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-
-        <div class="map-marker start" style="top: 8%; left: 10%;">
-          <span class="dot"></span>
-        </div>
-
-        <template v-if="showRefuges">
-          <div
-            v-for="space in quietSpaces"
-            :key="space.id"
-            class="map-marker refuge"
-            :style="{ top: space.top, left: space.left }"
-          >
-            <span class="pin"><Icon name="tent" :size="14" /></span>
-            <span class="pin-label">{{ space.label }}</span>
-          </div>
-        </template>
-      </template>
+      <div v-if="mapError" class="map-error">
+        Couldn't load the map. Check your connection and try again.
+      </div>
     </div>
 
     <section v-if="loading" class="route-summary skeleton-summary">
@@ -363,21 +446,26 @@ function reroute() {
   border-radius: var(--radius-lg);
 }
 
-.map-grid {
+.map-canvas {
   position: absolute;
   inset: 0;
-
-  background-image: radial-gradient(circle, #d8d2bf 1px, transparent 1px);
-  background-size: 22px 22px;
-  opacity: 0.7;
 }
 
-.map-path {
+.map-error {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0.85;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
+
+  background: var(--color-surface-muted);
+
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .map-loading {
@@ -420,58 +508,6 @@ function reroute() {
   50% {
     opacity: 1;
   }
-}
-
-.map-marker {
-  position: absolute;
-  transform: translate(-50%, -50%);
-}
-
-.map-marker.start .dot {
-  display: block;
-
-  width: 16px;
-  height: 16px;
-
-  background: var(--color-primary);
-  border: 3px solid var(--color-surface);
-  border-radius: 50%;
-  box-shadow: var(--shadow-sm);
-}
-
-.map-marker.refuge {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-
-  gap: 3px;
-}
-
-.pin {
-  display: grid;
-  place-items: center;
-
-  width: 28px;
-  height: 28px;
-
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 50%;
-  box-shadow: var(--shadow-sm);
-
-  color: var(--color-primary);
-}
-
-.pin-label {
-  padding: 3px 7px;
-
-  background: var(--color-surface);
-  border-radius: 6px;
-
-  color: var(--color-text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  white-space: nowrap;
 }
 
 .route-summary {
