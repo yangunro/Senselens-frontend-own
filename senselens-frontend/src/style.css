@@ -6,11 +6,10 @@
   --color-surface: #fffdf9;
   --color-surface-muted: #efeade;
 
-  /* Muted by default — sensory-sensitive users get a low-arousal baseline.
-     Full brand green only kicks in under the "High contrast" preference below. */
-  --color-primary: #6e6a5e;
-  --color-primary-dark: #524f46;
-  --color-primary-soft: #e6e3d8;
+  /* Sage green — primary brand */
+  --color-primary: #2f6f5f;
+  --color-primary-dark: #234f43;
+  --color-primary-soft: #e2ede7;
 
   --color-text: #26302b;
   --color-text-muted: #6d766e;
@@ -82,20 +81,30 @@ a:focus-visible {
   }
 }
 
-/* "High contrast / reduced motion" preference toggle — set on <html> by App.vue.
-   Opting in restores the full-saturation brand green in place of the muted default above. */
+/* "High contrast / reduced motion" preference toggle — set on <html> by App.vue. */
 :root[data-contrast="true"] {
-  --color-primary: #2a6656;
-  --color-primary-dark: #1a4437;
-  --color-primary-soft: #dcece5;
+  --color-text-muted: #23281f;
+  --color-text-faint: #454c41;
+  --color-border: #6b6252;
 
-  --color-text-muted: #3c453e;
-  --color-text-faint: #5c655e;
-  --color-border: #b7ae94;
+  --color-low: #145238;
+  --color-medium: #5c4008;
+  --color-high: #6e2c18;
+}
 
-  --color-low: #1c6b4f;
-  --color-medium: #7a5711;
-  --color-high: #8f3e28;
+/* Borders are the main visible signal of high-contrast mode (nearly invisible pale
+   tan by default), so give them real weight — not just a darker color. */
+[data-contrast="true"] .toggle-row,
+[data-contrast="true"] .slider-row,
+[data-contrast="true"] .route-summary,
+[data-contrast="true"] .status-card,
+[data-contrast="true"] .map-area,
+[data-contrast="true"] .alert-banner,
+[data-contrast="true"] .reroute-button {
+  /* !important: these selectors tie in specificity with the components' own
+     scoped `border: 1px solid var(--color-border)` rules, which win the cascade
+     on source order alone since style.css loads first. */
+  border-width: 2px !important;
 }
 
 [data-contrast="true"] * {

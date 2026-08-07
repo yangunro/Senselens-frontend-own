@@ -237,7 +237,7 @@ async function savePreferences() {
   position: absolute;
   inset: 0;
 
-  background: var(--color-border);
+  background: #d8d0c2;
   border-radius: var(--radius-pill);
 
   transition: background 0.15s ease;
