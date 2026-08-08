@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # SenseLens
 
 Real-time, sensory-aware wayfinding for Melbourne's CBD. Built for FIT5120,
