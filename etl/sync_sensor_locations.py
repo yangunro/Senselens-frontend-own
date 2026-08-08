@@ -1,5 +1,8 @@
 import requests
-
+from etl.validators import (
+    clean_text,
+    valid_melbourne_coordinates,
+)
 from etl.repository import upsert_sensor
 
 
@@ -42,13 +45,21 @@ def fetch_all_sensors():
 
 
 def transform_sensor(sensor):
+    lat = sensor.get("latitude")
+    lng = sensor.get("longitude")
+
+    if not valid_melbourne_coordinates(lat, lng):
+        return None
+
     return {
-        "SensorID": sensor["location_id"],
-        "SensorDescription": sensor.get("sensor_description"),
-        "Lat": sensor["latitude"],
-        "Lng": sensor["longitude"],
-        "Status": sensor.get("status"),
-        "InstallationDate": sensor.get("installation_date")
+        "SensorID": sensor.get("location_id"),
+        "SensorDescription": clean_text(
+            sensor.get("sensor_description")
+        ),
+        "Lat": float(lat),
+        "Lng": float(lng),
+        "Status": clean_text(sensor.get("status")),
+        "InstallationDate": sensor.get("installation_date"),
     }
 
 
@@ -59,6 +70,10 @@ def main():
 
     for sensor in sensors:
         transformed = transform_sensor(sensor)
+        if transformed is None:
+            print("Skipped invalid sensor:", sensor)
+            continue
+
         upsert_sensor(transformed)
 
     print("Sensor locations synced successfully!")
