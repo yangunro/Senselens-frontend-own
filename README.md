@@ -74,6 +74,6 @@ The system combines real-time pedestrian activity, historical pedestrian trends,
 
 Monash University
 
-Industry Experience Project
+Industry Experience Onboarding Project
 
 2026
