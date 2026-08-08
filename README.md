@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # SenseLens
 
 Real-time, sensory-aware wayfinding for Melbourne's CBD. Built for FIT5120,
@@ -96,6 +96,3 @@ STRIDE labelling, Data Management Plan, pitch rehearsal.
 - [ ] All critical and high-priority defects resolved
 - [ ] Acceptance criteria met and approved by mentors
 =======
-# SenseLense
-Onboarding Project: Building Sensory-Friendly Urban Futures
->>>>>>> 9ba8e26c8f7a2de8ae38e1f7a8efc8b61b25de61
