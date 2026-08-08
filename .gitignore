@@ -26,3 +26,6 @@ GTFS_apitoken.rtf
 
 # Screenshots
 *.png
+
+# Database dumps
+*.dump
