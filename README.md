@@ -221,6 +221,59 @@ This keeps HTTP handling separate from database and application logic.
 |---|---|---|---|
 | GET | `/users` | Retrieve users | Implemented |
 | POST | `/users` | Create a user | Implemented |
+| GET | `/preferences` | Retrieve sensory preferences | Implemented |
+| POST | `/preferences` | Save/update sensory preferences | Implemented |
+| GET | `/cbd-status` | Retrieve current CBD activity status | Implemented |
+| GET | `/pedestrian-counts/latest` | Retrieve the latest sensor readings and coordinates | Implemented |
+| GET | `/refuges` | Retrieve refuge locations | Implemented |
+| GET | `/saved-routes` | Retrieve saved routes | Implemented |
+| POST | `/saved-routes` | Save a route | Implemented |
+| DELETE | `/saved-routes/{saved_route_id}` | Delete a saved route | Implemented |
+| GET | `/routes` | Retrieve available stored routes | Implemented |
+| GET | `/routes?destination=...` | Generate live Google walking routes | Implemented |
+| GET | `/routes/{route_id}` | Retrieve a specific route | Implemented |
+| GET | `/routes/{route_id}/alerts` | Retrieve alerts associated with a route | Implemented |
+| GET | `/routes/{route_id}/forecast` | Retrieve the latest sensory forecast | Implemented |
+| GET | `/routes/{route_id}/quiet-spaces` | Retrieve quiet spaces for a route | Contract implemented |
+
+### Empty API Responses
+
+Some endpoints currently return empty arrays:
+
+```json
+[]
+```
+
+This is expected.
+
+For example:
+
+- `/refuges`
+- `/saved-routes`
+- `/routes` without a destination
+
+may return empty arrays because the corresponding tables have not yet been populated.
+
+The API endpoints have been implemented so the frontend contract is available before the routing and refuge-data pipelines are completed.
+
+No artificial refuge or route data is generated simply to populate these endpoints.
+
+Dynamic route generation requires the browser's current origin coordinates:
+
+```text
+GET /routes?destination=Melbourne%20Central&originLat=-37.8136&originLng=144.9631
+```
+
+The Vue client requests high-accuracy browser geolocation, rejects readings
+worse than 200 metres, and displays the live location and reported accuracy
+on the route map. Production geolocation requires HTTPS; localhost is allowed
+for development.
+
+The destination field uses Google `PlaceAutocompleteElement`. The browser key
+must have both Maps JavaScript API and Places API (New) enabled, and should be
+restricted to the application's local and production HTTP referrers. Selected
+suggestions provide `destinationLat` and `destinationLng`, so Google Routes
+can use the exact place rather than geocoding an ambiguous text value.
 
 ---
 
@@ -723,6 +776,9 @@ This prevents the cloud build environment from unexpectedly selecting a newer Py
 Create a `.env` file locally:
 
 ```env
+DATABASE_URL=YOUR_SUPABASE_POSTGRESQL_CONNECTION_URL
+GOOGLE_ROUTES_API_KEY=YOUR_SERVER_SIDE_GOOGLE_ROUTES_KEY
+FRONTEND_ORIGIN=http://localhost:5173,https://senselens.onrender.com
 DB_USER=postgres.<PROJECT_REF>
 DB_PASSWORD=<YOUR_DATABASE_PASSWORD>
 DB_HOST=<SUPABASE_SESSION_POOLER_HOST>
@@ -730,7 +786,7 @@ DB_PORT=5432
 DB_NAME=postgres
 ```
 
-Do not commit `.env`.
+Use either `DATABASE_URL` or the five `DB_*` settings. Never commit `.env` to Git.
 
 Production environment variables should be configured through the cloud hosting platform.
 
@@ -897,16 +953,15 @@ Latest backend checkpoint commit:
 | Saved-route read/create/delete APIs | Complete |
 | Backend documentation | Complete |
 | Frontend CORS configuration | Implemented |
-| Backend cloud deployment | In progress / verification required |
-| Frontend integration | In progress |
-| Dynamic route generation | Not completed |
-| True predictive forecasting | Not completed |
-| Route sensory scoring engine | Not completed |
-| Route recommendation engine | Not completed |
-| Refuge data population | Pending verified data source |
+| Backend cloud deployment | In progress |
+| Frontend integration | Route map and pedestrian markers implemented; remaining pages in progress |
+| Dynamic route generation | Implemented with Google Routes; database persistence pending |
+| Sensory scoring engine | Pedestrian crowd scoring implemented; construction and lighting pending |
+| Route recommendation engine | Crowd-aware ranking implemented; preference weighting pending |
+| Refuge data population | Not started / pending data source |
 | Route-to-refuge spatial matching | Not completed |
-| ETL scheduling | Not completed |
-| Production monitoring | Not completed |
+| ETL scheduling | Not started |
+| Production monitoring | Not started |
 
 ---
 
@@ -931,6 +986,10 @@ Then verify database-backed endpoints.
 ---
 
 ## 2. Verify Frontend-to-Backend Communication
+
+Dynamic walking-route generation now uses Google Routes when `/routes` is
+called with a destination. The API returns distance, duration, directions,
+and an encoded polyline for the Vue map.
 
 The deployed Vue application should call:
 
@@ -966,7 +1025,8 @@ Candidate Walking Routes
 SenseLens Backend
 ```
 
-Dynamic route generation is not currently part of the completed FastAPI backend.
+The remaining work is to persist generated route geometry and replace the
+temporary in-memory route-detail cache with durable storage.
 
 ---
 

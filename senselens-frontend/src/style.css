@@ -1,0 +1,157 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800&display=swap");
+
+:root {
+  /* Calm, warm neutral surface */
+  --color-bg: #f5f2ea;
+  --color-surface: #fffdf9;
+  --color-surface-muted: #efeade;
+
+  /* Sage green — primary brand */
+  --color-primary: #2f6f5f;
+  --color-primary-dark: #234f43;
+  --color-primary-soft: #e2ede7;
+
+  --color-text: #26302b;
+  --color-text-muted: #6d766e;
+  --color-text-faint: #a2a89f;
+  --color-border: #e6e0d1;
+
+  /* Sensory-level accents */
+  --color-low: #2f8f6f;
+  --color-low-bg: #e1f2e6;
+  --color-medium: #a97a1f;
+  --color-medium-bg: #f8ecd4;
+  --color-high: #b8563d;
+  --color-high-bg: #f6e2da;
+  --color-alert: #b8823a;
+  --color-alert-bg: #faf0dc;
+  --color-alert-border: #edd9ab;
+
+  --shadow-sm: 0 2px 10px rgba(43, 54, 47, 0.05);
+  --shadow-md: 0 12px 32px rgba(43, 54, 47, 0.08);
+
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 26px;
+  --radius-pill: 999px;
+
+  font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: inherit;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Route transition — used by App.vue */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* Loading skeleton — used while services/ calls are in flight */
+.skeleton {
+  background: linear-gradient(90deg, var(--color-surface-muted) 25%, #e6e1d3 37%, var(--color-surface-muted) 63%);
+  background-size: 400% 100%;
+  border-radius: var(--radius-sm);
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+/* Shared app shell — used by PageShell.vue on every screen.
+   .page-shell and .app-container share the same background, so on
+   wide screens the centered content column has no visible "card
+   floating on a different color" frame around it — just one seamless
+   page with breathing room at the edges. */
+.page-shell {
+  min-height: 100vh;
+  background: var(--color-surface);
+}
+
+.app-container {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  background: var(--color-surface);
+}
+
+.page-content {
+  padding: 30px 20px 116px;
+}
+
+@media (min-width: 768px) {
+  .app-container {
+    max-width: 760px;
+    margin: 0 auto;
+  }
+
+  .page-content {
+    padding: 40px 24px 116px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-container {
+    max-width: 1180px;
+  }
+
+  .page-content {
+    padding: 44px 58px 80px;
+  }
+}

@@ -1182,6 +1182,6 @@ The intended final architecture is:
 
 **SenseLens**
 
-Monash University  
-Industry Experience Onboarding Project  
+Monash University
+Industry Experience Onboarding Project
 2026
