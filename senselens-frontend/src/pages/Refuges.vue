@@ -12,6 +12,7 @@ const filter = ref("all");
 
 const filterOptions = [
   { value: "all", label: "All" },
+  { value: "Cafe", label: "Cafes" },
   { value: "Library", label: "Libraries" },
   { value: "Park", label: "Parks" },
 ];
@@ -56,11 +57,11 @@ onMounted(async () => {
         <div class="refuge-body">
           <div class="refuge-top">
             <h2>{{ refuge.name }}</h2>
-            <span class="distance">{{ refuge.distance }}</span>
+            <span v-if="refuge.distance" class="distance">{{ refuge.distance }}</span>
           </div>
 
           <span class="refuge-type">{{ refuge.type }}</span>
-          <p>{{ refuge.note }}</p>
+          <p v-if="refuge.note">{{ refuge.note }}</p>
         </div>
       </article>
     </div>
