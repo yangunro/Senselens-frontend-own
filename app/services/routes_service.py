@@ -173,3 +173,56 @@ def get_route_alerts(route_id):
         })
 
     return alerts
+
+def get_route_forecast(route_id):
+    query = text("""
+        SELECT
+            "SensoryIndicator",
+            "PedestrianDensityScore",
+            "ConstructionExposureScore",
+            "LightingComfortScore",
+            "ComputedAt"
+        FROM "SensoryScore"
+        WHERE "RouteID" = :route_id
+        ORDER BY "ComputedAt" DESC
+        LIMIT 1;
+    """)
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            query,
+            {"route_id": route_id},
+        ).mappings().first()
+
+    if row is None:
+        return None
+
+    return {
+        "routeId": str(route_id),
+        "sensoryIndicator": row["SensoryIndicator"],
+        "pedestrianDensityScore": (
+            float(row["PedestrianDensityScore"])
+            if row["PedestrianDensityScore"] is not None
+            else None
+        ),
+        "constructionExposureScore": (
+            float(row["ConstructionExposureScore"])
+            if row["ConstructionExposureScore"] is not None
+            else None
+        ),
+        "lightingComfortScore": (
+            float(row["LightingComfortScore"])
+            if row["LightingComfortScore"] is not None
+            else None
+        ),
+        "computedAt": (
+            row["ComputedAt"].isoformat()
+            if row["ComputedAt"] is not None
+            else None
+        ),
+    }
+
+def get_route_quiet_spaces(route_id):
+    # Refuge locations are not yet spatially matched to routes.
+    # Return an empty list rather than fabricating route/refuge matches.
+    return []

@@ -5,6 +5,8 @@ from fastapi import APIRouter, HTTPException, Query
 from app.services.routes_service import (
     get_route,
     get_route_alerts,
+    get_route_forecast,
+    get_route_quiet_spaces,
     get_routes,
 )
 
@@ -35,3 +37,21 @@ def route_detail(route_id: UUID):
 @router.get("/routes/{route_id}/alerts")
 def route_alerts(route_id: UUID):
     return get_route_alerts(route_id)
+
+
+@router.get("/routes/{route_id}/forecast")
+def route_forecast(route_id: UUID):
+    forecast = get_route_forecast(route_id)
+
+    if forecast is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Forecast data not available for this route",
+        )
+
+    return forecast
+
+
+@router.get("/routes/{route_id}/quiet-spaces")
+def route_quiet_spaces(route_id: UUID):
+    return get_route_quiet_spaces(route_id)

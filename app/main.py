@@ -4,13 +4,17 @@ from pydantic import BaseModel
 
 from app.database import SessionLocal
 from app.models import User
+
 from app.routers.cbd_status import router as cbd_status_router
 from app.routers.preferences import router as preferences_router
-from app.routers.saved_routes import router as saved_routes_router
 from app.routers.refuges import router as refuges_router
+from app.routers.saved_routes import router as saved_routes_router
 from app.routers.routes import router as routes_router
 
 
+# ============================================================
+# FastAPI Application
+# ============================================================
 
 app = FastAPI(
     title="SenseLens Backend API",
@@ -19,43 +23,66 @@ app = FastAPI(
 )
 
 
-# Allow the Vue frontend to call the backend during development.
-# Later, replace "*" with the deployed Vue frontend URL.
+# ============================================================
+# CORS Configuration
+# ============================================================
+#
+# Allows the deployed Vue frontend and local Vue development
+# server to communicate with this FastAPI backend.
+#
+# Production frontend:
+# https://senselens.onrender.com
+#
+
+origins = [
+    "https://senselens.onrender.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# Register routers
+# ============================================================
+# API Routers
+# ============================================================
+
 app.include_router(
     cbd_status_router,
     tags=["CBD Status"],
 )
-# Preferences router is registered after the CBD status router to ensure that the /preferences endpoint is accessible.
+
 app.include_router(
     preferences_router,
     tags=["User Preferences"],
 )
-# Register the refuges router to handle refuge-related endpoints.
+
 app.include_router(
     refuges_router,
     tags=["Refuges"],
 )
-# Register the saved routes router to handle saved route-related endpoints.
+
 app.include_router(
     saved_routes_router,
     tags=["Saved Routes"],
 )
-# Register the routes router to handle route-related endpoints.
+
 app.include_router(
     routes_router,
     tags=["Routes"],
 )
 
+
+# ============================================================
+# User Request Model
+# ============================================================
 
 class UserCreate(BaseModel):
     Email: str
@@ -63,13 +90,22 @@ class UserCreate(BaseModel):
     AuthProvider: str
 
 
+# ============================================================
+# Root Endpoint
+# ============================================================
+
 @app.get("/")
 def home():
     return {
-        "message": "SenseLens API is running",
+        "application": "SenseLens Backend API",
         "version": "1.0.0",
+        "status": "running",
     }
 
+
+# ============================================================
+# Health Check
+# ============================================================
 
 @app.get("/health")
 def health():
@@ -77,6 +113,10 @@ def health():
         "status": "healthy",
     }
 
+
+# ============================================================
+# Users
+# ============================================================
 
 @app.get("/users")
 def get_users():
@@ -132,6 +172,18 @@ def create_user(user_data: UserCreate):
             "DisplayName": new_user.DisplayName,
             "AuthProvider": new_user.AuthProvider,
         }
+
+    except HTTPException:
+        session.rollback()
+        raise
+
+    except Exception as error:
+        session.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to create user",
+        ) from error
 
     finally:
         session.close()
