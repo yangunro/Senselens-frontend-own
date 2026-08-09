@@ -1,4 +1,4 @@
-import { delay } from "./http";
+import { apiGet, delay, withApiFallback } from "./http";
 
 const mockCbdStatus = {
   level: "moderate",
@@ -7,7 +7,11 @@ const mockCbdStatus = {
 };
 
 export async function getCbdStatus() {
-  // TODO: replace with apiGet("/cbd-status") once the backend endpoint exists
-  await delay(350);
-  return mockCbdStatus;
+  return withApiFallback(
+    () => apiGet("/cbd-status"),
+    async () => {
+      await delay(350);
+      return mockCbdStatus;
+    }
+  );
 }

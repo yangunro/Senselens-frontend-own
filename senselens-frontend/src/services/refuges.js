@@ -1,4 +1,4 @@
-import { delay } from "./http";
+import { apiGet, delay, withApiFallback } from "./http";
 
 const mockRefuges = [
   {
@@ -36,7 +36,11 @@ const mockRefuges = [
 ];
 
 export async function getRefuges() {
-  // TODO: replace with apiGet("/refuges")
-  await delay(450);
-  return mockRefuges;
+  return withApiFallback(
+    () => apiGet("/refuges"),
+    async () => {
+      await delay(450);
+      return mockRefuges;
+    }
+  );
 }

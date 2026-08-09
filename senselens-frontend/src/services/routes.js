@@ -1,4 +1,4 @@
-import { delay } from "./http";
+import { apiGet, delay, withApiFallback } from "./http";
 
 const mockRouteOptions = [
   {
@@ -42,7 +42,11 @@ const mockRouteOptions = [
 ];
 
 export async function getRouteOptions(destination) {
-  // TODO: replace with apiGet(`/routes?destination=${encodeURIComponent(destination)}`)
-  await delay(500);
-  return mockRouteOptions;
+  return withApiFallback(
+    () => apiGet(`/routes?destination=${encodeURIComponent(destination)}`),
+    async () => {
+      await delay(500);
+      return mockRouteOptions;
+    }
+  );
 }

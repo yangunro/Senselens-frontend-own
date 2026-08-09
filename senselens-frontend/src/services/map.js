@@ -1,4 +1,4 @@
-import { delay } from "./http";
+import { apiGet, delay, withApiFallback } from "./http";
 
 const mockRouteDetails = {
   "quiet-flinders": {
@@ -85,25 +85,35 @@ const mockAlert = {
 };
 
 export async function getRouteDetail(routeId) {
-  // TODO: replace with apiGet(`/routes/${routeId}`)
-  await delay(300);
-  return mockRouteDetails[routeId] ?? mockRouteDetails["quiet-flinders"];
+  return withApiFallback(
+    () => apiGet(`/routes/${routeId}`),
+    async () => {
+      await delay(300);
+      return mockRouteDetails[routeId] ?? mockRouteDetails["quiet-flinders"];
+    }
+  );
 }
 
+// No backend endpoint for this yet (only /routes/{route_id} and
+// /routes/{route_id}/alerts exist) — stays mock-only until one exists.
 export async function getQuietSpaces(routeId) {
-  // TODO: replace with apiGet(`/routes/${routeId}/quiet-spaces`)
   await delay(450);
   return mockQuietSpaces;
 }
 
 export async function getSensoryAlert(routeId) {
-  // TODO: replace with apiGet(`/routes/${routeId}/alerts`) — return null when there's nothing to warn about
-  await delay(600);
-  return routeId === "quiet-flinders" ? null : mockAlert;
+  return withApiFallback(
+    () => apiGet(`/routes/${routeId}/alerts`),
+    async () => {
+      await delay(600);
+      return routeId === "quiet-flinders" ? null : mockAlert;
+    }
+  );
 }
 
+// No backend endpoint for this yet (US 2.2 predictive alerts) — stays
+// mock-only until one exists.
 export async function getForecast(routeId) {
-  // TODO: replace with apiGet(`/routes/${routeId}/forecast`) — return null when nothing is forecast
   await delay(550);
   return mockForecasts[routeId] ?? null;
 }

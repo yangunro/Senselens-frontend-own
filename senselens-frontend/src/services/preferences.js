@@ -1,4 +1,4 @@
-import { delay } from "./http";
+import { apiGet, apiPost, delay, withApiFallback } from "./http";
 
 const defaultPreferences = {
   sliders: [{ key: "crowd", label: "Crowd sensitivity", value: 0 }],
@@ -19,13 +19,21 @@ const defaultPreferences = {
 };
 
 export async function getPreferences() {
-  // TODO: replace with apiGet("/preferences")
-  await delay(350);
-  return defaultPreferences;
+  return withApiFallback(
+    () => apiGet("/preferences"),
+    async () => {
+      await delay(350);
+      return defaultPreferences;
+    }
+  );
 }
 
 export async function savePreferences(preferences) {
-  // TODO: replace with apiPost("/preferences", preferences)
-  await delay(500);
-  return { ok: true };
+  return withApiFallback(
+    () => apiPost("/preferences", preferences),
+    async () => {
+      await delay(500);
+      return { ok: true };
+    }
+  );
 }
