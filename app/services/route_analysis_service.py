@@ -101,6 +101,30 @@ def sensors_near_route(
     )
 
 
+def refuges_near_route(
+    route_points,
+    refuges,
+    radius_metres=DEFAULT_SENSOR_RADIUS_METRES,
+):
+    matched = []
+
+    for refuge in refuges:
+        distance = distance_to_route_metres(refuge, route_points)
+
+        if distance is None or distance > radius_metres:
+            continue
+
+        matched.append({
+            **refuge,
+            "distanceFromRouteM": round(distance, 1),
+        })
+
+    return sorted(
+        matched,
+        key=lambda refuge: refuge["distanceFromRouteM"],
+    )
+
+
 def _weighted_average_count(sensors):
     if not sensors:
         return None

@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import text
 
 from app.database import engine
@@ -9,7 +11,12 @@ from app.services.google_routes_service import get_google_routes
 from app.services.pedestrian_service import (
     get_latest_pedestrian_snapshot,
 )
-from app.services.route_analysis_service import analyse_route
+from app.services.refuges_service import get_refuges
+from app.services.route_analysis_service import (
+    analyse_route,
+    decode_route,
+    refuges_near_route,
+)
 
 
 DEFAULT_ORIGIN = {
@@ -346,9 +353,118 @@ def get_route_alerts(route_id):
 
     return alerts
 
-def get_route_forecast(route_id):
-    if get_dynamic_route(route_id) is not None:
+def _forecast_from_history(dynamic_route):
+    """
+    Estimate whether the upcoming hour will be busier or quieter
+    than usual for this route's nearby sensors, using real
+    historical hourly counts (same hour-of-day, same day-of-week)
+    from PedestrianHourlyHistory.
+
+    This is a historical-pattern heuristic, not a machine-learning
+    prediction. It compares each nearby sensor's typical count for
+    the upcoming hour+weekday against that same sensor's own
+    overall average, so it is calibrated per-location rather than
+    against an unrelated scale.
+    """
+
+    nearby_sensors = dynamic_route.get("nearbySensors") or []
+
+    if not nearby_sensors:
         return None
+
+    sensor_ids = [sensor["sensorId"] for sensor in nearby_sensors]
+
+    now = datetime.now(timezone.utc)
+    target_time = now + timedelta(hours=1)
+    target_hour = target_time.hour
+    # Postgres EXTRACT(DOW): Sunday=0 .. Saturday=6.
+    target_dow = target_time.isoweekday() % 7
+
+    query = text("""
+        SELECT
+            "SensorID" AS sensor_id,
+            AVG("HourlyCount") FILTER (
+                WHERE "HourDay" = :target_hour
+                  AND EXTRACT(DOW FROM "SensingDate") = :target_dow
+            ) AS upcoming_hour_avg,
+            AVG("HourlyCount") AS overall_avg
+        FROM "PedestrianHourlyHistory"
+        WHERE "SensorID" = ANY(:sensor_ids)
+        GROUP BY "SensorID";
+    """)
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            query,
+            {
+                "sensor_ids": sensor_ids,
+                "target_hour": target_hour,
+                "target_dow": target_dow,
+            },
+        ).mappings().all()
+
+    history_by_sensor = {row["sensor_id"]: row for row in rows}
+
+    weighted_ratio_total = 0.0
+    total_weight = 0.0
+    matched_sensor_count = 0
+
+    for sensor in nearby_sensors:
+        history = history_by_sensor.get(sensor["sensorId"])
+
+        if (
+            history is None
+            or history["upcoming_hour_avg"] is None
+            or not history["overall_avg"]
+        ):
+            continue
+
+        ratio = (
+            float(history["upcoming_hour_avg"])
+            / float(history["overall_avg"])
+        )
+
+        distance = sensor["distanceFromRouteM"]
+        weight = 1 / (1 + distance / 50)
+
+        weighted_ratio_total += ratio * weight
+        total_weight += weight
+        matched_sensor_count += 1
+
+    if matched_sensor_count == 0 or total_weight == 0:
+        return None
+
+    forecast_ratio = weighted_ratio_total / total_weight
+
+    if forecast_ratio < 0.85:
+        level, level_label = "low", "LOW SENSORY"
+    elif forecast_ratio < 1.25:
+        level, level_label = "medium", "MEDIUM SENSORY"
+    else:
+        level, level_label = "high", "HIGH SENSORY"
+
+    return {
+        "routeId": str(dynamic_route["id"]),
+        "sensoryIndicator": level_label,
+        "level": level,
+        "forecastRatio": round(forecast_ratio, 2),
+        "matchedSensorCount": matched_sensor_count,
+        "forecastFor": target_time.isoformat(),
+        "basis": (
+            f"Historical pedestrian counts for "
+            f"{matched_sensor_count} nearby sensor(s) at this "
+            "hour and day of week, compared to each sensor's own "
+            "typical hourly average."
+        ),
+        "computedAt": now.isoformat(),
+    }
+
+
+def get_route_forecast(route_id):
+    dynamic_route = get_dynamic_route(route_id)
+
+    if dynamic_route is not None:
+        return _forecast_from_history(dynamic_route)
 
     query = text("""
         SELECT
@@ -398,9 +514,42 @@ def get_route_forecast(route_id):
     }
 
 def get_route_quiet_spaces(route_id):
-    # Refuge locations are not yet spatially matched to routes.
-    # Return an empty list rather than fabricating route/refuge matches.
-    return []
+    dynamic_route = get_dynamic_route(route_id)
+
+    if dynamic_route is not None:
+        route_points = decode_route(dynamic_route.get("polyline"))
+    else:
+        stored_route = get_route(route_id)
+
+        if stored_route is None:
+            return []
+
+        # Stored (legacy) routes have no path geometry, only
+        # origin/destination points. Match against the straight
+        # line between them rather than fabricating a real path.
+        route_points = [
+            stored_route["origin"],
+            stored_route["destination"],
+        ]
+
+    if not route_points:
+        return []
+
+    refuges = get_refuges()
+    nearby = refuges_near_route(route_points, refuges)
+
+    return [
+        {
+            "refugeId": refuge["refugeId"],
+            "name": refuge["name"],
+            "category": refuge["category"],
+            "lat": refuge["lat"],
+            "lng": refuge["lng"],
+            "quietScore": refuge["quietScore"],
+            "distanceFromRouteM": refuge["distanceFromRouteM"],
+        }
+        for refuge in nearby
+    ]
 
 
 def create_route(
