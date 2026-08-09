@@ -1,4 +1,5 @@
 import { apiGet, delay, withApiFallback } from "./http";
+import { decodePolyline } from "./polyline";
 
 const mockRouteDetails = {
   "quiet-flinders": {
@@ -84,9 +85,33 @@ const mockAlert = {
   message: "A quieter path is available.",
 };
 
+const mockPedestrianCounts = {
+  observedAt: new Date().toISOString(),
+  sensorCount: 4,
+  totalCount: 42,
+  averageCount: 10.5,
+  maximumCount: 20,
+  sensors: [
+    { sensorId: 1, name: "Flinders Street Station", minuteCount: 20, lat: -37.8183, lng: 144.9671 },
+    { sensorId: 2, name: "Melbourne Central", minuteCount: 12, lat: -37.811, lng: 144.9643 },
+    { sensorId: 3, name: "Collins Street", minuteCount: 7, lat: -37.8155, lng: 144.9631 },
+    { sensorId: 4, name: "Bourke St Mall", minuteCount: 3, lat: -37.8136, lng: 144.9648 },
+  ],
+};
+
 export async function getRouteDetail(routeId) {
   return withApiFallback(
-    () => apiGet(`/routes/${routeId}`),
+    async () => {
+      const real = await apiGet(`/routes/${routeId}`);
+      // Real routes carry an encoded `polyline` instead of a plain path —
+      // decode it into the {lat, lng}[] shape the map already draws.
+      // Falls back to a straight line between the two endpoints if for some
+      // reason there's no polyline.
+      const path = real.polyline
+        ? decodePolyline(real.polyline)
+        : [real.origin, real.destination].filter(Boolean);
+      return { ...real, path };
+    },
     async () => {
       await delay(300);
       return mockRouteDetails[routeId] ?? mockRouteDetails["quiet-flinders"];
@@ -116,6 +141,16 @@ export async function getSensoryAlert(routeId) {
     async () => {
       await delay(600);
       return routeId === "quiet-flinders" ? null : mockAlert;
+    }
+  );
+}
+
+export async function getPedestrianCounts() {
+  return withApiFallback(
+    () => apiGet("/pedestrian-counts/latest"),
+    async () => {
+      await delay(400);
+      return mockPedestrianCounts;
     }
   );
 }

@@ -1,13 +1,24 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
+import { importLibrary } from "@googlemaps/js-api-loader";
+import { ensureGoogleMapsConfigured } from "../services/googleMapsLoader";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import { getCbdStatus } from "../services/home";
 
+const MELBOURNE_CBD = { lat: -37.8136, lng: 144.9631 };
+
 const router = useRouter();
 const destination = ref("");
+const autocompleteHost = ref(null);
+const autocompleteReady = ref(false);
+// Set only when the user actually picks a real place from the autocomplete
+// dropdown — free-typed text with no selection has no coordinates, so route
+// generation falls back to the old text-search behaviour for that case.
+const destinationPoint = ref(null);
+let autocompleteElement = null;
 
 const cbdStatus = ref(null);
 const loading = ref(true);
@@ -15,10 +26,63 @@ const loading = ref(true);
 onMounted(async () => {
   cbdStatus.value = await getCbdStatus();
   loading.value = false;
+  setupAutocomplete();
 });
 
+onBeforeUnmount(() => {
+  autocompleteElement?.removeEventListener("input", onAutocompleteInput);
+  autocompleteElement?.removeEventListener("gmp-select", onPlaceSelected);
+  autocompleteElement?.remove();
+});
+
+function onAutocompleteInput(event) {
+  destination.value = event.target?.value ?? autocompleteElement?.value ?? "";
+  destinationPoint.value = null;
+}
+
+async function onPlaceSelected(event) {
+  try {
+    const place = event.placePrediction.toPlace();
+    await place.fetchFields({ fields: ["displayName", "formattedAddress", "location"] });
+    if (!place.location) return;
+    destination.value = place.formattedAddress || place.displayName || "";
+    destinationPoint.value = { lat: place.location.lat(), lng: place.location.lng() };
+  } catch (err) {
+    console.warn("Failed to resolve the selected place:", err);
+  }
+}
+
+async function setupAutocomplete() {
+  try {
+    ensureGoogleMapsConfigured();
+    // The legacy `Autocomplete` class needs the old Places API enabled —
+    // PlaceAutocompleteElement is the newer web-component version, backed
+    // by Places API (New), which is what's actually turned on for this key.
+    const { PlaceAutocompleteElement } = await importLibrary("places");
+    autocompleteElement = new PlaceAutocompleteElement({
+      includedRegionCodes: ["au"],
+      locationBias: { center: MELBOURNE_CBD, radius: 50000 },
+    });
+    autocompleteElement.placeholder = "Enter your destination";
+    autocompleteElement.addEventListener("input", onAutocompleteInput);
+    autocompleteElement.addEventListener("gmp-select", onPlaceSelected);
+    autocompleteHost.value.appendChild(autocompleteElement);
+    autocompleteReady.value = true;
+  } catch (err) {
+    // Places Autocomplete is a nice-to-have — if it can't load (API not
+    // enabled, network issue), the plain text input below still works.
+    console.warn("Destination autocomplete unavailable, falling back to plain text search:", err);
+  }
+}
+
 function findCalmRoute() {
-  router.push({ path: "/routes", query: { destination: destination.value || "Collins Street" } });
+  router.push({
+    path: "/routes",
+    query: {
+      destination: destination.value || "Collins Street",
+      ...(destinationPoint.value ? { destLat: destinationPoint.value.lat, destLng: destinationPoint.value.lng } : {}),
+    },
+  });
 }
 </script>
 
@@ -77,10 +141,14 @@ function findCalmRoute() {
           <div class="search-box">
             <Icon class="search-icon" name="search" :size="19" />
 
+            <div v-show="autocompleteReady" ref="autocompleteHost" class="autocomplete-host"></div>
+
             <input
+              v-if="!autocompleteReady"
               v-model="destination"
               type="text"
               placeholder="Enter your destination"
+              autocomplete="off"
               @keyup.enter="findCalmRoute"
             />
           </div>
@@ -267,6 +335,25 @@ function findCalmRoute() {
   color: var(--color-text-faint);
 }
 
+.autocomplete-host {
+  display: flex;
+  align-items: center;
+
+  width: 100%;
+}
+
+.autocomplete-host :deep(gmp-place-autocomplete) {
+  width: 100%;
+  min-height: 56px;
+
+  background: transparent;
+  border: none;
+
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 14.5px;
+}
+
 .search-button {
   width: 100%;
 
@@ -322,6 +409,11 @@ function findCalmRoute() {
 
   .search-box input {
     height: 60px;
+    font-size: 16px;
+  }
+
+  .autocomplete-host :deep(gmp-place-autocomplete) {
+    min-height: 60px;
     font-size: 16px;
   }
 

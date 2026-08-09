@@ -1,5 +1,10 @@
 import { apiGet, delay, withApiFallback } from "./http";
 
+// Fallback starting point when real geolocation isn't available (denied,
+// unsupported, or too inaccurate) — Flinders Street Station, matching the
+// old fixed-origin mock behaviour and the map mock data (see services/map.js).
+const FALLBACK_ORIGIN = { lat: -37.8183, lng: 144.9671 };
+
 const mockRouteOptions = [
   {
     id: "quiet-flinders",
@@ -41,9 +46,22 @@ const mockRouteOptions = [
   },
 ];
 
-export async function getRouteOptions(destination) {
+// destinationPoint is only set once the user picks a real place from Home's
+// autocomplete — the backend computes real sensory-scored routes (crowd
+// percentile against live pedestrian sensors) when given real coordinates,
+// vs. just a destination string. origin defaults to Flinders Street Station
+// when real geolocation isn't available.
+export async function getRouteOptions(destination, destinationPoint, origin = FALLBACK_ORIGIN) {
+  const params = new URLSearchParams({ destination });
+  if (destinationPoint) {
+    params.set("originLat", origin.lat);
+    params.set("originLng", origin.lng);
+    params.set("destinationLat", destinationPoint.lat);
+    params.set("destinationLng", destinationPoint.lng);
+  }
+
   return withApiFallback(
-    () => apiGet(`/routes?destination=${encodeURIComponent(destination)}`),
+    () => apiGet(`/routes?${params.toString()}`),
     async () => {
       await delay(500);
       return mockRouteOptions;

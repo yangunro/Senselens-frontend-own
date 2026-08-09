@@ -1,12 +1,14 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
+import { importLibrary } from "@googlemaps/js-api-loader";
+import { ensureGoogleMapsConfigured } from "../services/googleMapsLoader";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import ProgressBar from "../components/ProgressBar.vue";
-import { getRouteDetail, getQuietSpaces, getSensoryAlert, getForecast } from "../services/map";
+import { getRouteDetail, getQuietSpaces, getSensoryAlert, getForecast, getPedestrianCounts } from "../services/map";
+import { watchCurrentLocation } from "../services/geolocation";
 import { usePreferences, toggleValue } from "../composables/usePreferences";
 
 const route = useRoute();
@@ -17,6 +19,7 @@ const activeRoute = ref(null);
 const quietSpaces = ref([]);
 const alert = ref(null);
 const forecast = ref(null);
+const pedestrianCounts = ref(null);
 const alertDismissed = ref(false);
 const loading = ref(true);
 
@@ -43,9 +46,12 @@ const mapError = ref(false);
 let map = null;
 let startMarker = null;
 let refugeMarkers = [];
+let sensorMarkers = [];
 let routePolyline = null;
+let currentLocationMarker = null;
+let stopLocationWatch = null;
 
-setOptions({ key: import.meta.env.VITE_GOOGLE_MAPS_API_KEY, v: "weekly" });
+ensureGoogleMapsConfigured();
 
 async function initMap() {
   try {
@@ -69,6 +75,59 @@ async function initMap() {
 function clearRefugeMarkers() {
   refugeMarkers.forEach((marker) => marker.setMap(null));
   refugeMarkers = [];
+}
+
+function clearSensorMarkers() {
+  sensorMarkers.forEach((marker) => marker.setMap(null));
+  sensorMarkers = [];
+}
+
+// Real-time pedestrian sensor readings, colour-coded on the same low/medium/high
+// scale as everything else in the app — relative to today's busiest sensor.
+function renderSensorMarkers() {
+  clearSensorMarkers();
+  if (!map || !pedestrianCounts.value?.sensors?.length) return;
+
+  const max = pedestrianCounts.value.maximumCount || 1;
+  sensorMarkers = pedestrianCounts.value.sensors.map((sensor) => {
+    const ratio = sensor.minuteCount / max;
+    const color = ratio > 0.66 ? "#b8563d" : ratio > 0.33 ? "#a97a1f" : "#2f8f6f";
+    return new google.maps.Marker({
+      position: { lat: sensor.lat, lng: sensor.lng },
+      map,
+      title: `${sensor.name}: ${sensor.minuteCount} pedestrians/min`,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 6 + ratio * 6,
+        fillColor: color,
+        fillOpacity: 0.55,
+        strokeColor: color,
+        strokeWeight: 1,
+      },
+      zIndex: 1,
+    });
+  });
+}
+
+// Classic "blue dot" — distinct from the green route-start marker so it
+// reads as "you, right now" rather than "where this route begins".
+function renderCurrentLocationMarker(position) {
+  if (!map) return;
+  currentLocationMarker?.setMap(null);
+  currentLocationMarker = new google.maps.Marker({
+    position: { lat: position.lat, lng: position.lng },
+    map,
+    title: `Your location (±${Math.round(position.accuracy)} m)`,
+    zIndex: 3,
+    icon: {
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: 7,
+      fillColor: "#4285f4",
+      fillOpacity: 1,
+      strokeColor: "#fffdf9",
+      strokeWeight: 3,
+    },
+  });
 }
 
 function renderMapLayer() {
@@ -161,8 +220,24 @@ const activeBanner = computed(() => {
 
 async function loadMap() {
   const routeId = route.query.route;
-  loading.value = true;
   alertDismissed.value = false;
+
+  // Landed on /map with no route picked (e.g. clicked the nav item
+  // directly) — show the bare map, not a route summary for a route the
+  // user never chose.
+  if (!routeId) {
+    loading.value = false;
+    activeRoute.value = null;
+    quietSpaces.value = [];
+    alert.value = null;
+    forecast.value = null;
+    clearRefugeMarkers();
+    routePolyline?.setMap(null);
+    startMarker?.setMap(null);
+    return;
+  }
+
+  loading.value = true;
   const [routeDetail, spaces, sensoryAlert, sensoryForecast] = await Promise.all([
     getRouteDetail(routeId),
     getQuietSpaces(routeId),
@@ -177,17 +252,30 @@ async function loadMap() {
   renderMapLayer();
 }
 
+async function loadPedestrianCounts() {
+  pedestrianCounts.value = await getPedestrianCounts();
+  renderSensorMarkers();
+}
+
 onMounted(async () => {
   await initMap();
-  await loadMap();
+  loadMap();
+  loadPedestrianCounts();
+  stopLocationWatch = watchCurrentLocation(
+    renderCurrentLocationMarker,
+    (err) => console.warn("Live location update failed:", err)
+  );
 });
 watch(() => route.query.route, loadMap);
 watch(showRefuges, renderMapLayer);
 
 onBeforeUnmount(() => {
   clearRefugeMarkers();
+  clearSensorMarkers();
   routePolyline?.setMap(null);
   startMarker?.setMap(null);
+  currentLocationMarker?.setMap(null);
+  stopLocationWatch?.();
 });
 
 function reroute() {

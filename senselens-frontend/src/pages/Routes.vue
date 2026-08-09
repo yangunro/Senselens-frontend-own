@@ -5,26 +5,61 @@ import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import { getRouteOptions } from "../services/routes";
+import { getAccurateCurrentLocation } from "../services/geolocation";
 
 const route = useRoute();
 const router = useRouter();
 
 const destination = computed(() => route.query.destination || "Collins Street");
+// Only present when the user picked a real place from Home's autocomplete —
+// lets the backend compute real sensory-scored routes instead of the mock
+// fallback (see services/routes.js).
+const destinationPoint = computed(() => {
+  const lat = Number(route.query.destLat);
+  const lng = Number(route.query.destLng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+});
 
 const routeOptions = ref([]);
 const selectedId = ref(null);
 const loading = ref(true);
+const locationAccuracy = ref(null);
+const locationError = ref("");
+
+let loadSequence = 0;
 
 async function loadRoutes() {
+  const sequence = ++loadSequence;
   loading.value = true;
-  routeOptions.value = await getRouteOptions(destination.value);
+  locationAccuracy.value = null;
+  locationError.value = "";
+
+  // Real routing needs a real starting point — only worth asking for GPS
+  // when we're actually generating real routes (destinationPoint set);
+  // the mock fallback doesn't care where "origin" is.
+  let origin;
+  if (destinationPoint.value) {
+    try {
+      origin = await getAccurateCurrentLocation();
+      if (sequence !== loadSequence) return;
+      locationAccuracy.value = Math.round(origin.accuracy);
+    } catch (err) {
+      if (sequence !== loadSequence) return;
+      locationError.value = err.message || "Unable to determine your current location.";
+      loading.value = false;
+      return;
+    }
+  }
+
+  routeOptions.value = await getRouteOptions(destination.value, destinationPoint.value, origin);
+  if (sequence !== loadSequence) return;
   const recommended = routeOptions.value.find((r) => r.recommended);
   selectedId.value = recommended?.id ?? routeOptions.value[0]?.id ?? null;
   loading.value = false;
 }
 
 onMounted(loadRoutes);
-watch(destination, loadRoutes);
+watch(() => [destination.value, destinationPoint.value], loadRoutes);
 
 function startCalmRoute() {
   router.push({ path: "/map", query: { route: selectedId.value } });
@@ -39,8 +74,12 @@ function startCalmRoute() {
       </button>
 
       <div>
-        <h1>Southern Cross Station to {{ destination }}</h1>
-        <p>Choose a route that matches your comfort level</p>
+        <h1 v-if="destinationPoint">Current location to {{ destination }}</h1>
+        <h1 v-else>Southern Cross Station to {{ destination }}</h1>
+
+        <p v-if="!destinationPoint">Choose a route that matches your comfort level</p>
+        <p v-else-if="locationAccuracy">Location accuracy: ±{{ locationAccuracy }} m</p>
+        <p v-else-if="!locationError">Finding your precise starting location…</p>
       </div>
     </header>
 
@@ -54,6 +93,12 @@ function startCalmRoute() {
         <SkeletonBlock width="95%" height="12px" />
         <SkeletonBlock width="60px" height="12px" />
       </div>
+    </div>
+
+    <div v-else-if="locationError" class="route-error">
+      <strong>We need your location to calculate an accurate route.</strong>
+      <p>{{ locationError }}</p>
+      <button type="button" class="retry-button" @click="loadRoutes">Try location again</button>
     </div>
 
     <div v-else class="route-list">
@@ -95,7 +140,7 @@ function startCalmRoute() {
       </button>
     </div>
 
-    <button class="start-button" :disabled="!selectedId" @click="startCalmRoute">
+    <button v-if="!locationError" class="start-button" :disabled="!selectedId" @click="startCalmRoute">
       Start calm route
     </button>
   </PageShell>
@@ -138,6 +183,44 @@ function startCalmRoute() {
 
   color: var(--color-text-muted);
   font-size: 13px;
+}
+
+.route-error {
+  margin-top: 24px;
+  padding: 19px;
+
+  background: var(--color-alert-bg);
+  border: 1px solid var(--color-alert-border);
+  border-radius: var(--radius-md);
+}
+
+.route-error strong {
+  display: block;
+
+  color: #6b4d16;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.route-error p {
+  margin: 6px 0 0;
+
+  color: #8a6a2a;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.retry-button {
+  margin-top: 14px;
+  padding: 10px 16px;
+
+  background: var(--color-surface);
+  border: 1px solid var(--color-alert-border);
+  border-radius: var(--radius-pill);
+
+  color: #8a6a2a;
+  font-size: 12.5px;
+  font-weight: 700;
 }
 
 .route-list {
