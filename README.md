@@ -4,7 +4,7 @@
 
 **SenseLens** is a sensory-aware navigation platform designed to support more comfortable walking experiences through Melbourne CBD.
 
-Traditional navigation applications generally optimise routes based on factors such as distance and travel time. SenseLens aims to extend this by considering environmental and sensory conditions that may affect a person's walking experience.
+Traditional navigation applications generally optimise routes based on distance and travel time. SenseLens aims to extend this by considering environmental and sensory conditions that may affect a person's walking experience.
 
 The platform is designed to combine:
 
@@ -14,11 +14,11 @@ The platform is designed to combine:
 - Street-light information
 - Quiet/refuge locations when available
 - User sensory preferences
-- Route information
+- Walking-route information
 
 The long-term goal is to recommend walking routes based not only on distance and duration, but also on the sensory preferences of the user.
 
-> **Current status:** The database, ETL foundation, cloud database integration, and core FastAPI API layer have been implemented. Dynamic sensory-aware route generation and recommendation are the next major development phase.
+> **Current status:** The database, Supabase migration, ETL foundation, FastAPI backend, core REST APIs, and frontend API contracts have been implemented. Backend cloud deployment and frontend integration are currently in progress. Dynamic sensory-aware route generation and recommendation are the next major development phase.
 
 ---
 
@@ -42,16 +42,35 @@ Supabase PostgreSQL
     Vue Frontend
 ```
 
+The production architecture is being configured as:
+
+```text
+City of Melbourne Open Data
+          │
+          ▼
+     ETL Pipelines
+          │
+          ▼
+Supabase PostgreSQL
+   Session Pooler
+          │
+          ▼
+     FastAPI Cloud
+          │
+          ▼
+     Vue Frontend
+        Render
+```
+
 ### Data Flow
 
 1. Public datasets are retrieved from City of Melbourne data sources.
 2. ETL pipelines extract, validate, clean, standardise, and transform the data.
 3. Processed data is stored in PostgreSQL hosted on Supabase.
-4. The FastAPI backend reads application data from Supabase.
-5. REST API endpoints expose the required data to the frontend.
-6. The Vue frontend consumes these APIs to build the SenseLens user experience.
-
-Future routing functionality will introduce a mapping/routing provider to generate candidate walking routes before SenseLens evaluates their sensory characteristics.
+4. FastAPI connects to the shared Supabase PostgreSQL database.
+5. REST API endpoints expose application data to the frontend.
+6. The Vue frontend consumes the APIs to build the SenseLens user experience.
+7. Future routing functionality will introduce candidate walking routes that can be evaluated against environmental and sensory data.
 
 ---
 
@@ -59,7 +78,7 @@ Future routing functionality will introduce a mapping/routing provider to genera
 
 ### Backend
 
-- Python
+- Python 3.13
 - FastAPI
 - SQLAlchemy
 - Psycopg
@@ -70,6 +89,7 @@ Future routing functionality will introduce a mapping/routing provider to genera
 
 - PostgreSQL
 - Supabase
+- Supabase Session Pooler
 
 ### ETL
 
@@ -78,24 +98,25 @@ Future routing functionality will introduce a mapping/routing provider to genera
 - City of Melbourne Open Data APIs
 - Incremental loading
 - Checkpoint-based synchronisation
+- UPSERT-based database loading
 
 ### Frontend
 
 - Vue
 - JavaScript
-- Render
+- Google Maps integration being developed by the frontend/integration team
 
-### Deployment
+### Cloud Infrastructure
 
-- Render — current frontend hosting
-- FastAPI Cloud — backend deployment in progress
-- Supabase — cloud PostgreSQL database
+- **Render** — Vue frontend
+- **FastAPI Cloud** — backend deployment
+- **Supabase** — PostgreSQL database
 
 ---
 
-## Repository Structure
+# Repository Structure
 
-The project is separated into application and data-processing components.
+The backend follows a router/service architecture.
 
 ```text
 SenseLens/
@@ -106,9 +127,9 @@ SenseLens/
 ├── .gitignore
 │
 ├── app/
-│   ├── README.md
 │   ├── main.py
 │   ├── database.py
+│   ├── models.py
 │   │
 │   ├── routers/
 │   │   ├── cbd_status.py
@@ -131,16 +152,17 @@ SenseLens/
 │   ├── validators.py
 │   └── ...
 │
-└── ...
+└── senselens-frontend/
+    └── ...
 ```
 
-The exact structure may continue to evolve as routing, deployment, and frontend integration are developed.
+The repository structure may continue to evolve as frontend integration, routing, and production deployment are completed.
 
 ---
 
-## Backend Architecture
+# Backend Architecture
 
-The FastAPI backend follows a layered structure:
+The FastAPI backend follows a layered architecture:
 
 ```text
 HTTP Request
@@ -152,23 +174,24 @@ FastAPI Router
 Service Layer
       │
       ▼
-SQLAlchemy
+SQLAlchemy / SQL
       │
       ▼
 Supabase PostgreSQL
 ```
 
-### Routers
+## Routers
 
 Routers are responsible for:
 
 - Defining HTTP endpoints
 - Receiving requests
-- Validating request parameters
-- Calling the appropriate service functions
+- Validating parameters
+- Calling service functions
 - Returning API responses
+- Returning appropriate HTTP status codes
 
-### Services
+## Services
 
 Services are responsible for:
 
@@ -177,18 +200,25 @@ Services are responsible for:
 - Data transformation
 - Preparing frontend-friendly responses
 
-This separation helps keep the backend maintainable as the application becomes more complex.
+This keeps HTTP handling separate from database and application logic.
 
 ---
 
-## Current Backend APIs
+# Current Backend APIs
 
-The following API endpoints have been implemented.
+## System
 
 | Method | Endpoint | Purpose | Status |
 |---|---|---|---|
-| GET | `/` | API root/status | Implemented |
+| GET | `/` | API information/status | Implemented |
 | GET | `/health` | Backend health check | Implemented |
+
+---
+
+## Users
+
+| Method | Endpoint | Purpose | Status |
+|---|---|---|---|
 | GET | `/users` | Retrieve users | Implemented |
 | POST | `/users` | Create a user | Implemented |
 | GET | `/preferences` | Retrieve sensory preferences | Implemented |
@@ -249,9 +279,226 @@ can use the exact place rather than geocoding an ambiguous text value.
 
 ## User Preferences
 
-SenseLens currently supports the following sensory preferences.
+| Method | Endpoint | Purpose | Status |
+|---|---|---|---|
+| GET | `/preferences` | Retrieve sensory preferences | Implemented |
+| POST | `/preferences` | Save/update sensory preferences | Implemented |
 
-### Sliders
+---
+
+## CBD Status
+
+| Method | Endpoint | Purpose | Status |
+|---|---|---|---|
+| GET | `/cbd-status` | Retrieve current CBD sensory/activity information | Implemented |
+
+---
+
+## Refuge Locations
+
+| Method | Endpoint | Purpose | Status |
+|---|---|---|---|
+| GET | `/refuges` | Retrieve available refuge locations | Implemented |
+
+The endpoint is ready, but the `RefugeLocation` table is not currently populated with verified refuge data.
+
+The backend does **not fabricate refuge locations**.
+
+---
+
+## Routes
+
+| Method | Endpoint | Purpose | Status |
+|---|---|---|---|
+| GET | `/routes` | Retrieve stored routes | Implemented |
+| GET | `/routes/{route_id}` | Retrieve a specific route | Implemented |
+| GET | `/routes/{route_id}/alerts` | Retrieve route alerts | Implemented |
+| GET | `/routes/{route_id}/forecast` | Retrieve latest available sensory state | Implemented |
+| GET | `/routes/{route_id}/quiet-spaces` | Retrieve quiet/refuge spaces associated with a route | API contract implemented |
+
+### Route Forecast
+
+The endpoint:
+
+```text
+GET /routes/{route_id}/forecast
+```
+
+currently retrieves the latest available `SensoryScore` information for a route.
+
+The response may contain:
+
+```json
+{
+  "routeId": "...",
+  "sensoryIndicator": "...",
+  "pedestrianDensityScore": 0.0,
+  "constructionExposureScore": 0.0,
+  "lightingComfortScore": 0.0,
+  "computedAt": "..."
+}
+```
+
+If no sensory/forecast information is available, the API returns:
+
+```json
+{
+  "detail": "Forecast data not available for this route"
+}
+```
+
+with:
+
+```text
+HTTP 404
+```
+
+### Important Forecast Limitation
+
+This is currently an **API contract for the latest sensory state**, not a true predictive forecasting model.
+
+A future forecasting system may use:
+
+```text
+Historical pedestrian activity
+          +
+Current pedestrian activity
+          +
+Time of day
+          +
+Day of week
+          +
+Environmental conditions
+          ↓
+Forecasting Model
+          ↓
+Expected Route Conditions
+```
+
+The API endpoint can remain stable while the internal forecasting implementation evolves.
+
+---
+
+## Route Quiet Spaces
+
+The endpoint:
+
+```text
+GET /routes/{route_id}/quiet-spaces
+```
+
+is implemented.
+
+At the current development stage it may return:
+
+```json
+[]
+```
+
+This is intentional because:
+
+- `RefugeLocation` has not yet been populated with verified refuge data.
+- Route-to-refuge spatial matching has not yet been implemented.
+
+SenseLens does not fabricate quiet-space matches simply to populate the response.
+
+Once refuge data and route geometry are available, this endpoint can identify suitable spaces near a candidate walking route.
+
+---
+
+# Saved Routes
+
+The Saved Routes API now supports the basic create/read/delete lifecycle.
+
+| Method | Endpoint | Purpose | Status |
+|---|---|---|---|
+| GET | `/saved-routes` | Retrieve saved routes | Implemented |
+| POST | `/saved-routes` | Save a route | Implemented |
+| DELETE | `/saved-routes/{saved_route_id}` | Delete a saved route | Implemented |
+
+## Saving a Route
+
+Example:
+
+```text
+POST /saved-routes
+```
+
+Request:
+
+```json
+{
+  "routeId": "ROUTE_UUID",
+  "label": "Home to Campus"
+}
+```
+
+The `RouteID` must correspond to a valid route in the database.
+
+If a nonexistent route is supplied, the database foreign-key relationship prevents an invalid saved route from being created and the API returns:
+
+```json
+{
+  "detail": "Route not found"
+}
+```
+
+with HTTP `404`.
+
+---
+
+## Deleting a Saved Route
+
+Example:
+
+```text
+DELETE /saved-routes/{saved_route_id}
+```
+
+If the saved route exists, it is removed from the database.
+
+If it does not exist, the API returns:
+
+```json
+{
+  "detail": "Saved route not found"
+}
+```
+
+with HTTP `404`.
+
+---
+
+# Empty API Responses
+
+Some endpoints may currently return:
+
+```json
+[]
+```
+
+This does not necessarily indicate an API failure.
+
+For example:
+
+```text
+GET /routes
+GET /refuges
+GET /saved-routes
+GET /routes/{route_id}/quiet-spaces
+```
+
+can legitimately return empty arrays while their underlying database tables contain no applicable records.
+
+The backend returns the actual database state rather than artificial demonstration data.
+
+---
+
+# User Preferences
+
+SenseLens currently supports sensory preferences that can later influence route recommendations.
+
+## Sensitivity Controls
 
 ```text
 Crowd sensitivity
@@ -259,7 +506,7 @@ Noise sensitivity
 Light sensitivity
 ```
 
-The frontend uses:
+The frontend represents sensitivity using:
 
 ```text
 0 = Low
@@ -267,31 +514,23 @@ The frontend uses:
 2 = High
 ```
 
-Noise and light sensitivity are stored in PostgreSQL using the `sensitivity_level` enum:
+Noise and light sensitivity are mapped to the corresponding database representation.
 
-```text
-Low
-Medium
-High
-```
+## Preference Toggles
 
-Crowd sensitivity is currently stored numerically.
-
-### Toggles
-
-Current preference toggles include:
+Current toggles include:
 
 - Avoid construction zones
 - Show refuge spaces
 - High contrast mode
 
-Preferences can be retrieved using:
+Preferences can be retrieved with:
 
 ```text
 GET /preferences
 ```
 
-and updated using:
+and updated with:
 
 ```text
 POST /preferences
@@ -299,22 +538,22 @@ POST /preferences
 
 ---
 
-## Database and Data Pipeline
+# Database
 
-The SenseLens PostgreSQL database is hosted on **Supabase**.
+SenseLens uses PostgreSQL hosted on **Supabase**.
 
-The FastAPI backend connects directly to this shared cloud database rather than relying on a developer's local PostgreSQL installation.
+The database was originally developed locally and subsequently migrated to the shared Supabase environment so all application services can use the same database.
 
-### Core Tables
+## Main Database Areas
 
-The database currently includes tables supporting:
+The database supports:
 
 - Users
 - User preferences
 - Pedestrian sensors
-- Live pedestrian counts
+- Current pedestrian counts
 - Historical pedestrian counts
-- Development/construction information
+- Development/construction activity
 - Street-light information
 - Routes
 - Route-to-sensor relationships
@@ -324,7 +563,7 @@ The database currently includes tables supporting:
 - Transit congestion signals
 - ETL checkpoints
 
-Examples include:
+Example tables include:
 
 ```text
 User
@@ -345,11 +584,35 @@ ETLCheckpoint
 
 ---
 
-## ETL Pipeline
+# Supabase Database Connectivity
 
-The ETL layer is responsible for moving external public data into the SenseLens database.
+The backend now uses the **Supabase Session Pooler** for PostgreSQL connectivity.
 
-The general ETL flow is:
+This was selected because the direct Supabase database hostname was not reliably reachable from the local development environment.
+
+The application uses environment variables:
+
+```env
+DB_USER=postgres.<PROJECT_REF>
+DB_PASSWORD=<YOUR_DATABASE_PASSWORD>
+DB_HOST=<SUPABASE_SESSION_POOLER_HOST>
+DB_PORT=5432
+DB_NAME=postgres
+```
+
+Real credentials must never be committed to Git.
+
+The database connection is constructed in the backend using these environment variables.
+
+The Session Pooler connection has been successfully tested from the local development environment.
+
+---
+
+# ETL Pipeline
+
+The ETL layer retrieves and prepares environmental information used by SenseLens.
+
+The general process is:
 
 ```text
 City of Melbourne API
@@ -373,77 +636,88 @@ Validate / Clean
 Supabase PostgreSQL
 ```
 
-### Implemented ETL Features
+## Implemented ETL Features
 
-The ETL framework currently includes:
+The ETL framework includes:
 
 - API extraction
 - Pagination
 - Data transformation
-- Data validation
+- Validation
 - Missing-value checks
-- Non-negative count validation
-- Standardised database field mappings
+- Non-negative pedestrian-count validation
+- Standardised field mappings
 - UPSERT operations
 - Duplicate protection
 - Incremental loading
 - Historical loading
 - ETL checkpoints
 - Error handling
-- Pedestrian data ingestion
-- Development/construction data ingestion
+- Pedestrian-data ingestion
+- Development/construction-data ingestion
 
-### Historical Pedestrian Loading
+---
+
+# Historical Pedestrian Loading
 
 Historical pedestrian data uses checkpoint-based incremental loading.
 
-Conceptually:
-
 ```text
-Last Successful Date
-        │
-        ▼
-Next Required Date
-        │
-        ▼
-Fetch Data
-        │
-        ▼
+ETLCheckpoint
+      │
+      ▼
+Last Successfully Loaded Date
+      │
+      ▼
+Determine Missing Dates
+      │
+      ▼
+City of Melbourne API
+      │
+      ▼
 Validate + Transform
-        │
-        ▼
+      │
+      ▼
 UPSERT
-        │
-        ▼
+      │
+      ▼
 Update Checkpoint
 ```
 
 This avoids repeatedly downloading the complete historical dataset.
 
-### Remaining ETL Work
+---
 
-The ETL framework is mostly complete, but additional work remains:
+# Remaining ETL Work
+
+The ETL framework is mostly complete, but production automation is still pending.
+
+Remaining work includes:
 
 - Automated ETL scheduling
 - Production job execution
 - Additional retry handling
-- Remaining street-light/data-source completion
-- Production monitoring and logging
+- Remaining data-source completion
+- Street-light pipeline completion where required
+- Production monitoring
+- Improved logging
 
 The ETL should therefore not yet be considered fully automated.
 
 ---
 
-## Local Backend Setup
+# Local Backend Setup
 
-### 1. Clone the repository
+## 1. Clone the repository
 
 ```bash
 git clone <repository-url>
 cd SenseLens
 ```
 
-### 2. Create a virtual environment
+---
+
+## 2. Create a virtual environment
 
 ```bash
 python -m venv .venv
@@ -455,13 +729,15 @@ Activate it on macOS/Linux:
 source .venv/bin/activate
 ```
 
-### 3. Install dependencies
+---
+
+## 3. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-The backend currently uses a minimal dependency set:
+The project uses a minimal cloud-compatible dependency list:
 
 ```text
 fastapi[standard]
@@ -471,30 +747,52 @@ python-dotenv
 requests
 ```
 
-The dependency file intentionally contains only project dependencies rather than packages from a developer's complete local Conda environment.
+The dependency file intentionally avoids packages exported from an entire local Conda environment.
 
 ---
 
-## Environment Variables
+# Python Version
 
-Create a local `.env` file:
+The cloud deployment uses Python 3.13.
+
+The repository contains:
+
+```text
+.python-version
+```
+
+with:
+
+```text
+3.13
+```
+
+This prevents the cloud build environment from unexpectedly selecting a newer Python version that may not yet be compatible with every dependency.
+
+---
+
+# Environment Variables
+
+Create a `.env` file locally:
 
 ```env
 DATABASE_URL=YOUR_SUPABASE_POSTGRESQL_CONNECTION_URL
 GOOGLE_ROUTES_API_KEY=YOUR_SERVER_SIDE_GOOGLE_ROUTES_KEY
 FRONTEND_ORIGIN=http://localhost:5173,https://senselens.onrender.com
+DB_USER=postgres.<PROJECT_REF>
+DB_PASSWORD=<YOUR_DATABASE_PASSWORD>
+DB_HOST=<SUPABASE_SESSION_POOLER_HOST>
+DB_PORT=5432
+DB_NAME=postgres
 ```
 
-The existing `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, and
-`DB_NAME` settings remain supported as an alternative to `DATABASE_URL`.
+Use either `DATABASE_URL` or the five `DB_*` settings. Never commit `.env` to Git.
 
-Do not commit `.env` to Git.
-
-Database credentials must not be stored directly in source code.
+Production environment variables should be configured through the cloud hosting platform.
 
 ---
 
-## Running the Backend Locally
+# Running the Backend Locally
 
 Run:
 
@@ -508,13 +806,13 @@ The development server should start at:
 http://127.0.0.1:8000
 ```
 
-Swagger documentation is available at:
+Swagger documentation:
 
 ```text
 http://127.0.0.1:8000/docs
 ```
 
-FastAPI automatically generates the OpenAPI specification at:
+OpenAPI specification:
 
 ```text
 http://127.0.0.1:8000/openapi.json
@@ -522,9 +820,36 @@ http://127.0.0.1:8000/openapi.json
 
 ---
 
-## Cloud Deployment
+# CORS Configuration
 
-### Frontend
+The FastAPI backend uses `CORSMiddleware` so the Vue application can access the API from a different origin.
+
+The currently allowed frontend origins are:
+
+```text
+https://senselens.onrender.com
+
+http://localhost:5173
+
+http://127.0.0.1:5173
+```
+
+This supports both:
+
+- The deployed Vue frontend
+- Local Vue development
+
+The production frontend URL is:
+
+```text
+https://senselens.onrender.com
+```
+
+---
+
+# Cloud Deployment
+
+## Frontend
 
 The Vue frontend is currently hosted on Render:
 
@@ -532,136 +857,163 @@ The Vue frontend is currently hosted on Render:
 https://senselens.onrender.com
 ```
 
-### Backend
+## Backend
 
-The FastAPI backend is currently being deployed through **FastAPI Cloud** using the project's GitHub repository.
+The FastAPI backend is connected to **FastAPI Cloud** through the project's GitHub repository.
 
-The intended architecture is:
+The intended production flow is:
 
 ```text
 Vue Frontend
-Render
-        │
-        ▼
+   Render
+      │
+      ▼
 FastAPI Backend
-FastAPI Cloud
-        │
-        ▼
-Supabase PostgreSQL
+ FastAPI Cloud
+      │
+      ▼
+Supabase Session Pooler
+      │
+      ▼
+PostgreSQL
 ```
 
-The frontend and backend do not need to be hosted by the same provider.
+The latest backend deployment should be verified in FastAPI Cloud after changes are pushed to `main`.
 
-### FastAPI Cloud Deployment Preparation
+Backend cloud deployment should not be considered complete until:
 
-The deployment configuration has been cleaned so cloud builds do not attempt to install packages from a developer's local Conda/macOS environment.
+- The latest build succeeds
+- `/health` responds publicly
+- `/docs` loads publicly
+- Supabase connectivity works from FastAPI Cloud
+- The Render frontend can access the backend without CORS errors
 
-The previous dependency file contained local paths similar to:
+---
+
+# FastAPI Cloud Environment
+
+The FastAPI Cloud environment must contain the same database configuration required by the application.
+
+Example:
 
 ```text
-file:///private/var/...
+DB_USER
+DB_PASSWORD
+DB_HOST
+DB_PORT
+DB_NAME
 ```
 
-These are not portable to Linux cloud environments.
+The production values should use the Supabase Session Pooler.
 
-The project now uses the minimal dependency list shown above.
+Local `.env` changes do **not** automatically update FastAPI Cloud environment variables.
 
-Python is also pinned to Python 3.13 using:
+Secrets must be configured using the cloud platform's environment/secrets functionality.
+
+---
+
+# Recent Backend Update
+
+The latest backend development checkpoint includes:
+
+- Route forecast API contract completed
+- Route quiet-spaces API contract completed
+- Saved-route creation API completed
+- Saved-route deletion API completed
+- Supabase Session Pooler connectivity tested locally
+- Frontend CORS configuration added
+- Local Swagger/OpenAPI testing completed
+- Changes pushed to the `main` branch
+
+Latest backend checkpoint commit:
 
 ```text
-.python-version
-```
-
-containing:
-
-```text
-3.13
-```
-
-The FastAPI Cloud deployment is currently **in progress** and should not be considered complete until the deployed API and Swagger documentation have been successfully verified.
-
-Once deployment succeeds, the frontend team will receive:
-
-```text
-API Base URL
-https://<backend-domain>
-
-Swagger
-https://<backend-domain>/docs
-```
-
-The frontend can then configure:
-
-```env
-VITE_API_BASE=https://<backend-domain>
+7bc19c2
 ```
 
 ---
 
-## Current Project Status
+# Current Project Status
 
 | Component | Status |
 |---|---|
 | Database design | Complete |
 | Supabase migration | Complete |
+| Supabase Session Pooler configuration | Complete locally |
 | ETL framework | Mostly complete |
 | Pedestrian data pipeline | Implemented |
 | Development/construction pipeline | Implemented |
-| FastAPI backend structure | Complete |
+| FastAPI backend architecture | Complete |
 | Core REST APIs | Complete |
 | User preferences API | Complete |
 | CBD status API | Complete |
 | Route API contract | Complete |
-| Refuge API contract | Complete |
-| Saved routes API contract | Complete |
+| Route forecast API contract | Complete |
+| Quiet-spaces API contract | Complete |
+| Saved-route read/create/delete APIs | Complete |
 | Backend documentation | Complete |
+| Frontend CORS configuration | Implemented |
 | Backend cloud deployment | In progress |
 | Frontend integration | Route map and pedestrian markers implemented; remaining pages in progress |
 | Dynamic route generation | Implemented with Google Routes; database persistence pending |
 | Sensory scoring engine | Pedestrian crowd scoring implemented; construction and lighting pending |
 | Route recommendation engine | Crowd-aware ranking implemented; preference weighting pending |
 | Refuge data population | Not started / pending data source |
+| Route-to-refuge spatial matching | Not completed |
 | ETL scheduling | Not started |
 | Production monitoring | Not started |
 
 ---
 
-## Next Development Phase
+# Next Development Phase
 
-The next major phase is to turn the existing backend infrastructure into the sensory-aware navigation engine.
+The next phase focuses on completing the end-to-end application flow.
 
-### 1. Complete Backend Deployment
+## 1. Verify FastAPI Cloud Deployment
 
-Verify the FastAPI Cloud deployment and confirm that endpoints such as:
-
-```text
-/health
-/cbd-status
-/preferences
-/routes
-```
-
-work from the public cloud URL.
-
-Then provide the frontend team with:
+Confirm:
 
 ```text
-API Base URL
-Swagger URL
+GET /
+GET /health
+GET /docs
 ```
+
+from the public FastAPI Cloud URL.
+
+Then verify database-backed endpoints.
 
 ---
 
-### 2. Dynamic Route Generation
+## 2. Verify Frontend-to-Backend Communication
 
 Dynamic walking-route generation now uses Google Routes when `/routes` is
 called with a destination. The API returns distance, duration, directions,
 and an encoded polyline for the Vue map.
 
-The next routing architecture will be:
+The deployed Vue application should call:
 
 ```text
-User Origin + Destination
+Vue / Render
+      │
+      ▼
+FastAPI Cloud
+```
+
+without CORS errors.
+
+The frontend team can then configure its API base URL to point to the deployed backend.
+
+---
+
+## 3. Dynamic Route Generation
+
+The frontend/integration work will provide or request candidate walking routes.
+
+Conceptually:
+
+```text
+Origin + Destination
         │
         ▼
 Mapping / Routing Provider
@@ -678,11 +1030,9 @@ temporary in-memory route-detail cache with durable storage.
 
 ---
 
-### 3. Associate Environmental Data with Routes
+## 4. Associate Routes with Environmental Data
 
-Candidate routes will then be evaluated against SenseLens data.
-
-Potential inputs include:
+Candidate routes will eventually be evaluated against:
 
 ```text
 Pedestrian Sensors
@@ -693,30 +1043,31 @@ Construction / Development
         +
 Street Lighting
         +
-Refuge Locations
+Verified Refuge Locations
         ↓
-Candidate Route Analysis
+Route Environmental Profile
 ```
 
-The `RouteSensor` relationship will help associate pedestrian sensors with routes.
+The existing `RouteSensor` relationship can support association between routes and pedestrian sensors.
 
 ---
 
-### 4. Sensory Scoring
+## 5. Sensory Scoring
 
-Each candidate route will receive sensory measurements such as:
+Future route scoring will consider factors such as:
 
 - Pedestrian density
 - Construction exposure
 - Lighting comfort
+- Other validated sensory/environmental indicators
 
-These will be stored or represented through `SensoryScore`.
+These can be represented through the existing `SensoryScore` data model.
 
 ---
 
-### 5. Preference-Aware Recommendation
+## 6. Preference-Aware Route Recommendation
 
-User preferences will influence the route ranking.
+User preferences will eventually influence candidate-route ranking.
 
 Conceptually:
 
@@ -726,73 +1077,45 @@ Candidate Route
 Environmental Conditions
       +
 User Preferences
-      ↓
-Sensory Score
-      ↓
+      │
+      ▼
+Sensory Scoring
+      │
+      ▼
 Route Ranking
-      ↓
+      │
+      ▼
 Recommended Route
 ```
 
-For example, a user with high crowd sensitivity may prefer a slightly longer route with lower pedestrian activity.
+For example, a user with high crowd sensitivity may prefer a slightly longer walking route with lower expected pedestrian activity.
 
-A user who enables:
-
-```text
-Avoid construction zones = true
-```
-
-may receive a strong penalty for candidate routes passing through construction-heavy areas.
-
-The exact scoring formula and thresholds still need to be designed, tested, and documented.
+The exact scoring algorithm still needs to be designed, validated, and documented.
 
 ---
 
-### 6. Refuge Integration
+## 7. Refuge Integration
 
-The `/refuges` API is implemented, but refuge-location data has not yet been populated.
+The refuge API contract exists, but verified refuge-location data still needs to be identified and populated.
 
-Potential quiet/refuge spaces may eventually include suitable:
+Potential categories may include suitable:
 
 - Parks
 - Libraries
 - Community spaces
-- Other curated low-stimulation locations
+- Other verified low-stimulation locations
 
-Refuge data must come from a verified dataset or a documented curation process.
+Any refuge dataset or curation methodology should be documented.
 
-SenseLens should **not fabricate refuge locations**.
-
----
-
-### 7. Frontend Integration
-
-Once the backend receives a public URL, the Vue frontend can begin consuming:
-
-```text
-GET /cbd-status
-
-GET /preferences
-POST /preferences
-
-GET /routes
-GET /routes/{route_id}
-GET /routes/{route_id}/alerts
-
-GET /saved-routes
-
-GET /refuges
-```
-
-The map interface will eventually display candidate routes, environmental conditions, sensory information, and the recommended route.
+SenseLens should not fabricate refuge locations.
 
 ---
 
-### 8. ETL Automation
+## 8. ETL Automation
 
-After the main application flow is functioning, the ETL pipelines will be scheduled automatically.
+After the main application flow is stable, ETL pipelines can be scheduled automatically.
 
-The intended production flow will become:
+The target production flow is:
 
 ```text
 Scheduled Job
@@ -813,45 +1136,60 @@ FastAPI
 Frontend
 ```
 
-This will keep pedestrian and environmental information up to date without requiring developers to manually execute ETL scripts.
+This will keep environmental data updated without requiring manual execution.
 
 ---
 
-## Development Principles
+# Development Principles
 
-The project currently follows several important principles:
+## No Fabricated Data
 
-### No fabricated data
+If underlying data is unavailable, the backend returns an empty or unavailable response instead of inventing values.
 
-If an underlying table contains no data, the API returns an empty or unavailable response rather than inventing values.
+---
 
-### Separation of responsibilities
+## Separation of Responsibilities
 
 ```text
 ETL
-→ obtains and prepares external data
+→ retrieves and prepares external data
 
-Database
-→ stores application data
+Supabase
+→ stores shared application data
 
 FastAPI
-→ exposes business logic and APIs
+→ provides backend business logic and REST APIs
 
 Vue
-→ handles the user interface
+→ provides the user interface
+
+Mapping Integration
+→ handles map display and candidate route generation
 ```
-
-### Environment-based configuration
-
-Secrets and database credentials are stored using environment variables rather than being committed to GitHub.
-
-### Incremental development
-
-Features are implemented and tested independently before additional complexity is introduced.
 
 ---
 
-## Target Architecture
+## Secure Configuration
+
+Secrets are stored using environment variables rather than being hard-coded in the repository.
+
+---
+
+## Stable API Contracts
+
+Where possible, frontend-facing API contracts are established before more advanced internal functionality is implemented.
+
+For example:
+
+```text
+GET /routes/{route_id}/forecast
+```
+
+can remain stable while the internal implementation evolves from the current sensory-state retrieval to a future predictive model.
+
+---
+
+# Target Architecture
 
 The intended final architecture is:
 
@@ -864,40 +1202,43 @@ The intended final architecture is:
                          ▼
                  Supabase PostgreSQL
                          │
-              ┌──────────┴──────────┐
-              │                     │
-              │              Environmental Data
-              │                     │
-              ▼                     ▼
-        FastAPI Backend ◄──── Routing Provider
-              │
-              │
-        Sensory Scoring
-              │
-              ▼
-       Route Recommendation
-              │
-              ▼
-          Vue Frontend
-              │
-              ▼
-        Interactive Map
+                         ▼
+                  FastAPI Backend
+                         ▲
+                         │
+                  Candidate Routes
+                         │
+                 Mapping Provider
+                         │
+                         ▼
+                 Sensory Scoring
+                         │
+                         ▼
+               Route Recommendation
+                         │
+                         ▼
+                   Vue Frontend
+                         │
+                         ▼
+                 Interactive Map
 ```
 
 ---
 
-## Security Notes
+# Security Notes
 
 - Never commit `.env`.
 - Never commit database passwords.
-- Never expose the Supabase PostgreSQL password to the frontend.
-- The Vue frontend should communicate with FastAPI rather than directly using privileged database credentials.
-- Production secrets should be configured through the hosting provider's environment/secrets management.
-- Database access should follow least-privilege principles as the application moves toward production.
+- Never expose PostgreSQL credentials to the frontend.
+- Database credentials belong only in the backend environment.
+- The frontend should communicate with FastAPI rather than directly connecting to PostgreSQL.
+- Production secrets should be configured through the hosting provider.
+- Database access should follow least-privilege principles.
+- Rotate credentials if they are accidentally exposed.
 
 ---
 
-## Team
+# Team
 
 **SenseLens**
 
