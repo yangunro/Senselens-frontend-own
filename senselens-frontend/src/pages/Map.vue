@@ -8,7 +8,8 @@ import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import ProgressBar from "../components/ProgressBar.vue";
 import { getRouteDetail, getQuietSpaces, getSensoryAlert, getForecast, getPedestrianCounts } from "../services/map";
-import { watchCurrentLocation } from "../services/geolocation";
+import { getRouteOptions } from "../services/routes";
+import { watchCurrentLocation, getAccurateCurrentLocation } from "../services/geolocation";
 import { usePreferences, toggleValue } from "../composables/usePreferences";
 
 const route = useRoute();
@@ -218,22 +219,42 @@ const activeBanner = computed(() => {
   return null;
 });
 
+function clearRouteView() {
+  loading.value = false;
+  activeRoute.value = null;
+  quietSpaces.value = [];
+  alert.value = null;
+  forecast.value = null;
+  clearRefugeMarkers();
+  routePolyline?.setMap(null);
+  startMarker?.setMap(null);
+}
+
 async function loadMap() {
-  const routeId = route.query.route;
+  let routeId = route.query.route;
   alertDismissed.value = false;
 
-  // Landed on /map with no route picked (e.g. clicked the nav item
-  // directly) — show the bare map, not a route summary for a route the
-  // user never chose.
+  // Arrived from a refuge card — no route id yet, but we do have a
+  // destination and its coordinates, so generate the route on the fly
+  // instead of sending the user back through the Routes picker.
+  const destLat = Number(route.query.destLat);
+  const destLng = Number(route.query.destLng);
+  if (!routeId && route.query.destination && Number.isFinite(destLat) && Number.isFinite(destLng)) {
+    loading.value = true;
+    try {
+      const origin = await getAccurateCurrentLocation();
+      const options = await getRouteOptions(route.query.destination, { lat: destLat, lng: destLng }, origin);
+      const recommended = options.find((option) => option.recommended) ?? options[0];
+      if (recommended) routeId = recommended.id;
+    } catch (err) {
+      console.warn("On-the-fly route generation failed:", err);
+    }
+  }
+
+  // No route to show (bare /map, or generation above failed) — show the
+  // plain map rather than a route summary for a route the user never chose.
   if (!routeId) {
-    loading.value = false;
-    activeRoute.value = null;
-    quietSpaces.value = [];
-    alert.value = null;
-    forecast.value = null;
-    clearRefugeMarkers();
-    routePolyline?.setMap(null);
-    startMarker?.setMap(null);
+    clearRouteView();
     return;
   }
 

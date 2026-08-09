@@ -6,6 +6,8 @@ import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import { getRouteOptions } from "../services/routes";
 import { getAccurateCurrentLocation } from "../services/geolocation";
+import { geocodeAddress } from "../services/geocode";
+import { API_BASE } from "../services/http";
 
 const route = useRoute();
 const router = useRouter();
@@ -25,6 +27,7 @@ const selectedId = ref(null);
 const loading = ref(true);
 const locationAccuracy = ref(null);
 const locationError = ref("");
+const routeError = ref("");
 
 let loadSequence = 0;
 
@@ -33,12 +36,30 @@ async function loadRoutes() {
   loading.value = true;
   locationAccuracy.value = null;
   locationError.value = "";
+  routeError.value = "";
 
-  // Real routing needs a real starting point — only worth asking for GPS
-  // when we're actually generating real routes (destinationPoint set);
-  // the mock fallback doesn't care where "origin" is.
+  let effectiveDestinationPoint = destinationPoint.value;
   let origin;
-  if (destinationPoint.value) {
+
+  // Mock mode (no backend configured) doesn't care about real coordinates or
+  // location — only worth resolving either once we're actually calling a
+  // real backend, which requires both.
+  if (API_BASE) {
+    // Typed text without picking a dropdown suggestion has no coordinates
+    // yet — resolve it ourselves instead of sending a request the backend
+    // is guaranteed to reject.
+    if (!effectiveDestinationPoint) {
+      try {
+        effectiveDestinationPoint = await geocodeAddress(destination.value);
+      } catch (err) {
+        if (sequence !== loadSequence) return;
+        routeError.value = err.message || `We couldn't find "${destination.value}".`;
+        loading.value = false;
+        return;
+      }
+      if (sequence !== loadSequence) return;
+    }
+
     try {
       origin = await getAccurateCurrentLocation();
       if (sequence !== loadSequence) return;
@@ -51,7 +72,14 @@ async function loadRoutes() {
     }
   }
 
-  routeOptions.value = await getRouteOptions(destination.value, destinationPoint.value, origin);
+  try {
+    routeOptions.value = await getRouteOptions(destination.value, effectiveDestinationPoint, origin);
+  } catch (err) {
+    if (sequence !== loadSequence) return;
+    routeError.value = "We couldn't calculate a route right now. Please try again.";
+    loading.value = false;
+    return;
+  }
   if (sequence !== loadSequence) return;
   const recommended = routeOptions.value.find((r) => r.recommended);
   selectedId.value = recommended?.id ?? routeOptions.value[0]?.id ?? null;
@@ -74,12 +102,12 @@ function startCalmRoute() {
       </button>
 
       <div>
-        <h1 v-if="destinationPoint">Current location to {{ destination }}</h1>
+        <h1 v-if="API_BASE">Current location to {{ destination }}</h1>
         <h1 v-else>Southern Cross Station to {{ destination }}</h1>
 
-        <p v-if="!destinationPoint">Choose a route that matches your comfort level</p>
+        <p v-if="!API_BASE">Choose a route that matches your comfort level</p>
         <p v-else-if="locationAccuracy">Location accuracy: ±{{ locationAccuracy }} m</p>
-        <p v-else-if="!locationError">Finding your precise starting location…</p>
+        <p v-else-if="!locationError && !routeError">Finding your precise starting location…</p>
       </div>
     </header>
 
@@ -99,6 +127,12 @@ function startCalmRoute() {
       <strong>We need your location to calculate an accurate route.</strong>
       <p>{{ locationError }}</p>
       <button type="button" class="retry-button" @click="loadRoutes">Try location again</button>
+    </div>
+
+    <div v-else-if="routeError" class="route-error">
+      <strong>We couldn't generate a route.</strong>
+      <p>{{ routeError }}</p>
+      <button type="button" class="retry-button" @click="loadRoutes">Try again</button>
     </div>
 
     <div v-else class="route-list">
@@ -140,7 +174,7 @@ function startCalmRoute() {
       </button>
     </div>
 
-    <button v-if="!locationError" class="start-button" :disabled="!selectedId" @click="startCalmRoute">
+    <button v-if="!locationError && !routeError" class="start-button" :disabled="!selectedId" @click="startCalmRoute">
       Start calm route
     </button>
   </PageShell>

@@ -1,4 +1,4 @@
-import { apiGet, delay, withApiFallback } from "./http";
+import { apiGet, delay, API_BASE } from "./http";
 
 // Fallback starting point when real geolocation isn't available (denied,
 // unsupported, or too inaccurate) — Flinders Street Station, matching the
@@ -52,6 +52,15 @@ const mockRouteOptions = [
 // vs. just a destination string. origin defaults to Flinders Street Station
 // when real geolocation isn't available.
 export async function getRouteOptions(destination, destinationPoint, origin = FALLBACK_ORIGIN) {
+  // No backend configured at all (local dev without .env) — mock is the only
+  // option. Once a backend is configured, a failed request throws instead of
+  // silently swapping in mock data, so a genuine outage shows an error state
+  // rather than pretending to be a real route.
+  if (!API_BASE) {
+    await delay(500);
+    return mockRouteOptions;
+  }
+
   const params = new URLSearchParams({ destination });
   if (destinationPoint) {
     params.set("originLat", origin.lat);
@@ -60,11 +69,5 @@ export async function getRouteOptions(destination, destinationPoint, origin = FA
     params.set("destinationLng", destinationPoint.lng);
   }
 
-  return withApiFallback(
-    () => apiGet(`/routes?${params.toString()}`),
-    async () => {
-      await delay(500);
-      return mockRouteOptions;
-    }
-  );
+  return apiGet(`/routes?${params.toString()}`);
 }
