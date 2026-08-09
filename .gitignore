@@ -29,3 +29,6 @@ GTFS_apitoken.rtf
 
 # Database dumps
 *.dump
+
+# Temporary files
+requirements-old.txt
