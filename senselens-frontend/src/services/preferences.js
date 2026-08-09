@@ -11,8 +11,8 @@ const defaultPreferences = {
     },
     {
       key: "contrast",
-      label: "High contrast / reduced motion mode",
-      note: "Use stronger colors and fewer animations for comfort.",
+      label: "High contrast mode",
+      note: "Increase contrast to make text and interface elements easier to distinguish.",
       value: false,
     },
   ],

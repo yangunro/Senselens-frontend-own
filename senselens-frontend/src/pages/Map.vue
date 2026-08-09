@@ -201,102 +201,106 @@ function reroute() {
 
 <template>
   <PageShell>
-    <transition name="fade">
-      <div v-if="activeBanner" class="alert-banner">
-        <div class="alert-text">
-          <Icon class="alert-icon" name="alert" :size="18" />
+    <div class="map-shell">
+      <div class="map-overlays">
+        <transition name="fade">
+          <div v-if="activeBanner" class="alert-banner">
+            <div class="alert-text">
+              <Icon class="alert-icon" name="alert" :size="18" />
+
+              <div>
+                <strong>{{ activeBanner.title }}</strong>
+                <p>{{ activeBanner.message }}</p>
+              </div>
+            </div>
+
+            <button class="reroute-button" @click="reroute">
+              <Icon name="refresh" :size="13" />
+              {{ activeRoute?.alternativeId ? "Take calmer route" : "Dismiss" }}
+            </button>
+          </div>
+        </transition>
+
+        <div v-if="forecast" class="forecast-banner">
+          <Icon class="forecast-icon" name="trendingUp" :size="18" />
 
           <div>
-            <strong>{{ activeBanner.title }}</strong>
-            <p>{{ activeBanner.message }}</p>
+            <strong>Likely busy in {{ forecast.etaMinutesStart }}–{{ forecast.etaMinutesEnd }} min: {{ forecast.area }}</strong>
+            <p>{{ forecast.message }}</p>
+            <p class="forecast-disclaimer">Estimate based on available pedestrian data — actual conditions may vary.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="map-area">
+        <div ref="mapEl" class="map-canvas"></div>
+
+        <div v-if="loading || !mapReady" class="map-loading">
+          <span class="map-loading-dot"></span>
+          Finding your calm route…
+        </div>
+
+        <div v-if="mapError" class="map-error">
+          Couldn't load the map. Check your connection and try again.
+        </div>
+      </div>
+
+      <section v-if="loading" class="route-summary skeleton-summary">
+        <div class="summary-top">
+          <SkeletonBlock width="130px" height="17px" />
+          <SkeletonBlock width="80px" height="20px" radius="999px" />
+        </div>
+        <SkeletonBlock width="100%" height="6px" radius="999px" />
+        <div class="skeleton-stat-grid">
+          <SkeletonBlock v-for="n in 4" :key="n" width="100%" height="34px" />
+        </div>
+      </section>
+
+      <section v-else-if="activeRoute" class="route-summary">
+        <div class="summary-top">
+          <h2>{{ activeRoute.name }}</h2>
+
+          <span class="sensory-badge" :class="`level-${activeRoute.level}`">
+            {{ activeRoute.levelLabel }}
+          </span>
+        </div>
+
+        <div class="progress-row">
+          <ProgressBar :value="activeRoute.progress" />
+          <span class="progress-label">
+            <Icon name="check" :size="13" />
+            {{ activeRoute.progress }}% of the way there
+          </span>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat">
+            <span class="stat-label">Duration</span>
+            <strong class="stat-value">{{ activeRoute.duration }}</strong>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Distance</span>
+            <strong class="stat-value">{{ activeRoute.distance }}</strong>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Quiet spaces</span>
+            <strong class="stat-value">{{ quietSpaces.length }}</strong>
           </div>
         </div>
 
-        <button class="reroute-button" @click="reroute">
-          <Icon name="refresh" :size="13" />
-          {{ activeRoute?.alternativeId ? "Take calmer route" : "Dismiss" }}
-        </button>
-      </div>
-    </transition>
+        <div v-if="activeRoute.transit" class="transit-row">
+          <Icon name="train" :size="15" />
+          <span>{{ activeRoute.transit.walk }} walk to {{ activeRoute.transit.stop }}</span>
+        </div>
 
-    <div v-if="forecast" class="forecast-banner">
-      <Icon class="forecast-icon" name="trendingUp" :size="18" />
-
-      <div>
-        <strong>Likely busy in {{ forecast.etaMinutesStart }}–{{ forecast.etaMinutesEnd }} min: {{ forecast.area }}</strong>
-        <p>{{ forecast.message }}</p>
-        <p class="forecast-disclaimer">Estimate based on available pedestrian data — actual conditions may vary.</p>
-      </div>
+        <div v-if="activeRoute.factors?.length" class="factor-chips">
+          <span v-for="factor in activeRoute.factors" :key="factor.label" class="factor-chip">
+            <Icon :name="factor.icon" :size="13" />
+            {{ factor.label }}
+          </span>
+        </div>
+      </section>
     </div>
-
-    <div class="map-area">
-      <div ref="mapEl" class="map-canvas"></div>
-
-      <div v-if="loading || !mapReady" class="map-loading">
-        <span class="map-loading-dot"></span>
-        Finding your calm route…
-      </div>
-
-      <div v-if="mapError" class="map-error">
-        Couldn't load the map. Check your connection and try again.
-      </div>
-    </div>
-
-    <section v-if="loading" class="route-summary skeleton-summary">
-      <div class="summary-top">
-        <SkeletonBlock width="130px" height="17px" />
-        <SkeletonBlock width="80px" height="20px" radius="999px" />
-      </div>
-      <SkeletonBlock width="100%" height="6px" radius="999px" />
-      <div class="skeleton-stat-grid">
-        <SkeletonBlock v-for="n in 4" :key="n" width="100%" height="34px" />
-      </div>
-    </section>
-
-    <section v-else-if="activeRoute" class="route-summary">
-      <div class="summary-top">
-        <h2>{{ activeRoute.name }}</h2>
-
-        <span class="sensory-badge" :class="`level-${activeRoute.level}`">
-          {{ activeRoute.levelLabel }}
-        </span>
-      </div>
-
-      <div class="progress-row">
-        <ProgressBar :value="activeRoute.progress" />
-        <span class="progress-label">
-          <Icon name="check" :size="13" />
-          {{ activeRoute.progress }}% of the way there
-        </span>
-      </div>
-
-      <div class="stat-grid">
-        <div class="stat">
-          <span class="stat-label">Duration</span>
-          <strong class="stat-value">{{ activeRoute.duration }}</strong>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Distance</span>
-          <strong class="stat-value">{{ activeRoute.distance }}</strong>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Quiet spaces</span>
-          <strong class="stat-value">{{ quietSpaces.length }}</strong>
-        </div>
-      </div>
-
-      <div v-if="activeRoute.transit" class="transit-row">
-        <Icon name="train" :size="15" />
-        <span>{{ activeRoute.transit.walk }} walk to {{ activeRoute.transit.stop }}</span>
-      </div>
-
-      <div v-if="activeRoute.factors?.length" class="factor-chips">
-        <span v-for="factor in activeRoute.factors" :key="factor.label" class="factor-chip">
-          <Icon :name="factor.icon" :size="13" />
-          {{ factor.label }}
-        </span>
-      </div>
-    </section>
   </PageShell>
 </template>
 
@@ -653,8 +657,61 @@ function reroute() {
 }
 
 @media (min-width: 1024px) {
+  /* Desktop: the map fills the whole shell edge-to-edge and everything
+     else — alerts, forecast, route summary — floats on top of it as
+     docked panels, instead of stacking in a column below a small map. */
+  .map-shell {
+    position: relative;
+
+    /* .page-content's own padding-top (44px) isn't enough clearance on its
+       own — the top nav is an absolutely-positioned 78px-tall box anchored
+       to .app-container's top edge, so it overlaps anything starting much
+       closer than that to the top. */
+    margin-top: 44px;
+    height: clamp(520px, calc(100vh - 250px), 820px);
+  }
+
+  .map-area {
+    position: absolute;
+    inset: 0;
+
+    height: 100%;
+    margin-top: 0;
+  }
+
+  .map-overlays {
+    position: absolute;
+    z-index: 2;
+    top: 20px;
+    left: 20px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    width: 400px;
+    max-width: calc(100% - 380px);
+  }
+
+  .alert-banner,
+  .forecast-banner {
+    margin-top: 0;
+    box-shadow: var(--shadow-md);
+  }
+
   .route-summary {
-    max-width: 480px;
+    position: absolute;
+    z-index: 2;
+    top: 20px;
+    right: 20px;
+    bottom: 20px;
+
+    overflow-y: auto;
+    width: 340px;
+    max-width: calc(100% - 420px);
+    margin-top: 0;
+
+    box-shadow: var(--shadow-md);
   }
 }
 </style>

@@ -2,7 +2,6 @@
 
 :root {
   /* Calm, warm neutral surface */
-  --color-bg: #f5f2ea;
   --color-surface: #fffdf9;
   --color-surface-muted: #efeade;
 
@@ -51,7 +50,11 @@ body,
 
 body {
   min-width: 320px;
-  background: var(--color-bg);
+  /* Matches .page-shell/.app-container (not --color-bg) — .page-shell's
+     height is capped at desktop widths (see below), so body's own
+     background can now show below it on short pages; it needs to be the
+     same shade or that shows up as a visible seam. */
+  background: var(--color-surface);
   color: var(--color-text);
   font-family: inherit;
   -webkit-font-smoothing: antialiased;
@@ -83,6 +86,10 @@ a:focus-visible {
 
 /* "High contrast / reduced motion" preference toggle — set on <html> by App.vue. */
 :root[data-contrast="true"] {
+  /* Crisp white instead of the default warm off-white — less warmth means
+     more contrast against dark text and borders. */
+  --color-surface: #ffffff;
+
   --color-text-muted: #23281f;
   --color-text-faint: #454c41;
   --color-border: #6b6252;
@@ -178,11 +185,33 @@ a:focus-visible {
 }
 
 @media (min-width: 1024px) {
+  /* Capped instead of a full 100vh, so short pages (Settings, Refuges)
+     don't center their content inside a huge slab of empty space. .app-container
+     still grows past this floor for taller pages (Map) — min-height is just
+     a minimum, so nothing gets clipped. .page-shell is capped to the same
+     value so it never shows below a shorter .app-container as a gap. */
+  .page-shell {
+    min-height: min(100vh, 640px);
+  }
+
   .app-container {
     max-width: 1180px;
+    min-height: min(100vh, 640px);
+
+    /* .app-container keeps spanning at least this height so the nav
+       (anchored to its top-right corner) sits at the same spot on every
+       page — only .page-content is centered in the space below/around it.
+       Centering .app-container itself (nav included) was tried, but its
+       height varies per page's content, so the nav visibly jumped up and
+       down when switching pages. */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
 
   .page-content {
-    padding: 44px 58px 80px;
+    /* Nav sits at the top-right at this breakpoint (not fixed to the
+       bottom), so there's no need for the mobile-sized bottom clearance. */
+    padding: 44px 58px;
   }
 }
