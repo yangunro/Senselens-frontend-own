@@ -1,11 +1,12 @@
 <script setup>
 import Icon from "./Icon.vue";
 
+// Settings is intentionally not linked here — page still exists at
+// /settings, just not reachable from navigation.
 const navItems = [
   { to: "/", label: "Home", icon: "home" },
   { to: "/map", label: "Map", icon: "map" },
   { to: "/refuges", label: "Refuges", icon: "refuge" },
-  { to: "/settings", label: "Settings", icon: "settings" },
 ];
 </script>
 
@@ -36,7 +37,7 @@ const navItems = [
   z-index: 10;
 
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
 
   height: 80px;
   padding: 10px 14px 14px;
