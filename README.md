@@ -194,11 +194,17 @@ The following API endpoints have been implemented.
 | GET | `/preferences` | Retrieve sensory preferences | Implemented |
 | POST | `/preferences` | Save/update sensory preferences | Implemented |
 | GET | `/cbd-status` | Retrieve current CBD activity status | Implemented |
+| GET | `/pedestrian-counts/latest` | Retrieve the latest sensor readings and coordinates | Implemented |
 | GET | `/refuges` | Retrieve refuge locations | Implemented |
 | GET | `/saved-routes` | Retrieve saved routes | Implemented |
+| POST | `/saved-routes` | Save a route | Implemented |
+| DELETE | `/saved-routes/{saved_route_id}` | Delete a saved route | Implemented |
 | GET | `/routes` | Retrieve available stored routes | Implemented |
+| GET | `/routes?destination=...` | Generate live Google walking routes | Implemented |
 | GET | `/routes/{route_id}` | Retrieve a specific route | Implemented |
 | GET | `/routes/{route_id}/alerts` | Retrieve alerts associated with a route | Implemented |
+| GET | `/routes/{route_id}/forecast` | Retrieve the latest sensory forecast | Implemented |
+| GET | `/routes/{route_id}/quiet-spaces` | Retrieve quiet spaces for a route | Contract implemented |
 
 ### Empty API Responses
 
@@ -214,13 +220,30 @@ For example:
 
 - `/refuges`
 - `/saved-routes`
-- `/routes`
+- `/routes` without a destination
 
 may return empty arrays because the corresponding tables have not yet been populated.
 
 The API endpoints have been implemented so the frontend contract is available before the routing and refuge-data pipelines are completed.
 
 No artificial refuge or route data is generated simply to populate these endpoints.
+
+Dynamic route generation requires the browser's current origin coordinates:
+
+```text
+GET /routes?destination=Melbourne%20Central&originLat=-37.8136&originLng=144.9631
+```
+
+The Vue client requests high-accuracy browser geolocation, rejects readings
+worse than 200 metres, and displays the live location and reported accuracy
+on the route map. Production geolocation requires HTTPS; localhost is allowed
+for development.
+
+The destination field uses Google `PlaceAutocompleteElement`. The browser key
+must have both Maps JavaScript API and Places API (New) enabled, and should be
+restricted to the application's local and production HTTP referrers. Selected
+suggestions provide `destinationLat` and `destinationLng`, so Google Routes
+can use the exact place rather than geocoding an ambiguous text value.
 
 ---
 
@@ -457,12 +480,13 @@ The dependency file intentionally contains only project dependencies rather than
 Create a local `.env` file:
 
 ```env
-DB_USER=YOUR_DATABASE_USER
-DB_PASSWORD=YOUR_DATABASE_PASSWORD
-DB_HOST=YOUR_SUPABASE_DATABASE_HOST
-DB_PORT=5432
-DB_NAME=postgres
+DATABASE_URL=YOUR_SUPABASE_POSTGRESQL_CONNECTION_URL
+GOOGLE_ROUTES_API_KEY=YOUR_SERVER_SIDE_GOOGLE_ROUTES_KEY
+FRONTEND_ORIGIN=http://localhost:5173,https://senselens.onrender.com
 ```
+
+The existing `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, and
+`DB_NAME` settings remain supported as an alternative to `DATABASE_URL`.
 
 Do not commit `.env` to Git.
 
@@ -592,10 +616,10 @@ VITE_API_BASE=https://<backend-domain>
 | Saved routes API contract | Complete |
 | Backend documentation | Complete |
 | Backend cloud deployment | In progress |
-| Frontend integration | In progress |
-| Dynamic route generation | Not started |
-| Sensory scoring engine | Not started |
-| Route recommendation engine | Not started |
+| Frontend integration | Route map and pedestrian markers implemented; remaining pages in progress |
+| Dynamic route generation | Implemented with Google Routes; database persistence pending |
+| Sensory scoring engine | Pedestrian crowd scoring implemented; construction and lighting pending |
+| Route recommendation engine | Crowd-aware ranking implemented; preference weighting pending |
 | Refuge data population | Not started / pending data source |
 | ETL scheduling | Not started |
 | Production monitoring | Not started |
@@ -630,7 +654,9 @@ Swagger URL
 
 ### 2. Dynamic Route Generation
 
-The current `Route` table stores route information, but dynamic walking-route generation has not yet been implemented.
+Dynamic walking-route generation now uses Google Routes when `/routes` is
+called with a destination. The API returns distance, duration, directions,
+and an encoded polyline for the Vue map.
 
 The next routing architecture will be:
 
@@ -647,7 +673,8 @@ Candidate Walking Routes
 SenseLens Backend
 ```
 
-A suitable mapping/routing provider will be integrated to obtain route geometry, distance, duration, and alternative walking routes.
+The remaining work is to persist generated route geometry and replace the
+temporary in-memory route-detail cache with durable storage.
 
 ---
 

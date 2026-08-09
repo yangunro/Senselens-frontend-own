@@ -5,22 +5,86 @@ import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import { getRoutes as getRouteOptions } from "../services/map";
+import { getAccurateCurrentLocation } from "../services/geolocation";
 
 const route = useRoute();
 const router = useRouter();
 
 const destination = computed(() => route.query.destination || "Collins Street");
+const destinationLocation = computed(
+  () => {
+    const lat = Number(
+      route.query.destinationLat,
+    );
+    const lng = Number(
+      route.query.destinationLng,
+    );
+
+    return Number.isFinite(lat) &&
+      Number.isFinite(lng)
+      ? { lat, lng }
+      : null;
+  },
+);
 
 const routeOptions = ref([]);
 const selectedId = ref(null);
 const loading = ref(true);
+const errorMessage = ref("");
+const locationAccuracy = ref(null);
+
+let loadSequence = 0;
 
 async function loadRoutes() {
+  const sequence = ++loadSequence;
+
   loading.value = true;
-  routeOptions.value = await getRouteOptions(destination.value);
-  const recommended = routeOptions.value.find((r) => r.recommended);
-  selectedId.value = recommended?.id ?? routeOptions.value[0]?.id ?? null;
-  loading.value = false;
+  errorMessage.value = "";
+  locationAccuracy.value = null;
+  routeOptions.value = [];
+  selectedId.value = null;
+
+  try {
+    const origin =
+      await getAccurateCurrentLocation();
+
+    if (sequence !== loadSequence) {
+      return;
+    }
+
+    locationAccuracy.value =
+      Math.round(origin.accuracy);
+    routeOptions.value =
+      await getRouteOptions(
+        destination.value,
+        origin,
+        destinationLocation.value,
+      );
+
+    if (sequence !== loadSequence) {
+      return;
+    }
+
+    const recommended =
+      routeOptions.value.find(
+        (item) => item.recommended,
+      );
+
+    selectedId.value =
+      recommended?.id ??
+      routeOptions.value[0]?.id ??
+      null;
+  } catch (error) {
+    if (sequence === loadSequence) {
+      errorMessage.value =
+        error.message ||
+        "Unable to calculate routes from your current location.";
+    }
+  } finally {
+    if (sequence === loadSequence) {
+      loading.value = false;
+    }
+  }
 }
 
 onMounted(loadRoutes);
@@ -39,8 +103,11 @@ function startCalmRoute() {
       </button>
 
       <div>
-        <h1>Southern Cross Station to {{ destination }}</h1>
-        <p>Choose a route that matches your comfort level</p>
+        <h1>Current location to {{ destination }}</h1>
+        <p v-if="locationAccuracy">
+          Location accuracy: ±{{ locationAccuracy }} m
+        </p>
+        <p v-else>Finding your precise starting location</p>
       </div>
     </header>
 
@@ -54,6 +121,14 @@ function startCalmRoute() {
         <SkeletonBlock width="95%" height="12px" />
         <SkeletonBlock width="60px" height="12px" />
       </div>
+    </div>
+
+    <div v-else-if="errorMessage" class="route-error">
+      <strong>We need your location to calculate an accurate route.</strong>
+      <p>{{ errorMessage }}</p>
+      <button type="button" @click="loadRoutes">
+        Try location again
+      </button>
     </div>
 
     <div v-else class="route-list">
@@ -135,6 +210,39 @@ function startCalmRoute() {
   gap: 14px;
 
   margin-top: 24px;
+}
+
+.route-error {
+  margin-top: 24px;
+  padding: 18px;
+
+  background: var(--color-alert-bg);
+  border: 1px solid var(--color-alert-border);
+  border-radius: var(--radius-md);
+}
+
+.route-error strong {
+  color: #6b4d16;
+  font-size: 13px;
+}
+
+.route-error p {
+  margin: 7px 0 14px;
+
+  color: #8a6a2a;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.route-error button {
+  padding: 9px 14px;
+
+  background: var(--color-surface);
+  border: 1px solid var(--color-alert-border);
+  border-radius: var(--radius-pill);
+
+  color: #6b4d16;
+  font-weight: 700;
 }
 
 .route-card {

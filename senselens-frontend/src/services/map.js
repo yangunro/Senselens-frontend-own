@@ -1,6 +1,6 @@
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
-  "http://localhost:3000";
+  "http://localhost:8000";
 
 async function request(path) {
   console.log(
@@ -29,6 +29,7 @@ async function request(path) {
 export async function getRoutes(
   destination,
   origin = null,
+  destinationLocation = null,
 ) {
   const params = new URLSearchParams();
 
@@ -43,6 +44,18 @@ export async function getRoutes(
     params.set(
       "originLng",
       origin.lng,
+    );
+  }
+
+  if (destinationLocation) {
+    params.set(
+      "destinationLat",
+      destinationLocation.lat,
+    );
+
+    params.set(
+      "destinationLng",
+      destinationLocation.lng,
     );
   }
 

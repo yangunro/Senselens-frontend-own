@@ -1,5 +1,10 @@
 <script setup>
-import { ref, watch, onMounted } from "vue";
+import {
+  ref,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+} from "vue";
 import { useRoute } from "vue-router";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
@@ -11,6 +16,10 @@ import {
   getQuietSpaces,
   getSensoryAlert,
 } from "../services/map";
+import {
+  getAccurateCurrentLocation,
+  watchCurrentLocation,
+} from "../services/geolocation";
 import RouteMap from "../components/RouteMap.vue";
 const route = useRoute();
 const errorMessage = ref("");
@@ -19,6 +28,9 @@ const quietSpaces = ref([]);
 const alert = ref(null);
 const alertDismissed = ref(false);
 const loading = ref(true);
+const currentLocation = ref(null);
+
+let stopLocationWatch = null;
 
 async function loadMap() {
   let routeId = route.query.route;
@@ -29,8 +41,30 @@ async function loadMap() {
 
   try {
     if (!routeId) {
+      const origin =
+        currentLocation.value ||
+        await getAccurateCurrentLocation();
+
+      currentLocation.value = origin;
+
       const routes = await getRoutes(
         route.query.destination || "Collins Street",
+        origin,
+        Number.isFinite(
+          Number(route.query.destinationLat),
+        ) &&
+          Number.isFinite(
+            Number(route.query.destinationLng),
+          )
+          ? {
+              lat: Number(
+                route.query.destinationLat,
+              ),
+              lng: Number(
+                route.query.destinationLng,
+              ),
+            }
+          : null,
       );
 
       const recommendedRoute =
@@ -43,12 +77,18 @@ async function loadMap() {
       routeId = recommendedRoute.id;
     }
 
-    [activeRoute.value, quietSpaces.value, alert.value] =
+    const [routeDetail, spaces, alerts] =
       await Promise.all([
         getRouteDetail(routeId),
         getQuietSpaces(routeId),
         getSensoryAlert(routeId),
       ]);
+
+    activeRoute.value = routeDetail;
+    quietSpaces.value = spaces;
+    alert.value = Array.isArray(alerts)
+      ? alerts[0] ?? null
+      : alerts;
   } catch (error) {
     console.error("Unable to load map:", error);
 
@@ -63,7 +103,27 @@ async function loadMap() {
   }
 }
 
-onMounted(loadMap);
+onMounted(async () => {
+  await loadMap();
+
+  stopLocationWatch =
+    watchCurrentLocation(
+      (position) => {
+        currentLocation.value = position;
+      },
+      (error) => {
+        console.warn(
+          "Live location update failed:",
+          error,
+        );
+      },
+    );
+});
+
+onBeforeUnmount(() => {
+  stopLocationWatch?.();
+});
+
 watch(() => route.query.route, loadMap);
 
 function reroute() {
@@ -101,6 +161,8 @@ function reroute() {
         v-else-if="activeRoute"
         :polyline="activeRoute.polyline"
         :quiet-spaces="quietSpaces"
+        :pedestrian-sensors="activeRoute.nearbySensors || []"
+        :current-location="currentLocation"
       />
 
       <div v-else class="map-loading">
@@ -148,6 +210,22 @@ function reroute() {
         <div class="stat">
           <span class="stat-label">Quiet spaces</span>
           <strong class="stat-value">{{ quietSpaces.length }}</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Nearby sensors</span>
+          <strong class="stat-value">
+            {{ activeRoute.matchedSensorCount ?? 0 }}
+          </strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Location accuracy</span>
+          <strong class="stat-value">
+            {{
+              currentLocation
+                ? `±${Math.round(currentLocation.accuracy)} m`
+                : "Waiting…"
+            }}
+          </strong>
         </div>
         <div class="stat">
           <span class="stat-label">Wayfinding</span>

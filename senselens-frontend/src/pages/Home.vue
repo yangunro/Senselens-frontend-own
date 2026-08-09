@@ -4,10 +4,12 @@ import { useRouter } from "vue-router";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
+import AddressAutocomplete from "../components/AddressAutocomplete.vue";
 import { getCbdStatus, getSavedRoutes } from "../services/home";
 
 const router = useRouter();
 const destination = ref("");
+const selectedDestination = ref(null);
 
 const cbdStatus = ref(null);
 const savedRoutes = ref([]);
@@ -19,7 +21,53 @@ onMounted(async () => {
 });
 
 function findCalmRoute() {
-  router.push({ path: "/routes", query: { destination: destination.value || "Collins Street" } });
+  const query = {
+    destination:
+      destination.value ||
+      "Collins Street",
+  };
+
+  if (
+    Number.isFinite(
+      selectedDestination.value?.lat,
+    ) &&
+    Number.isFinite(
+      selectedDestination.value?.lng,
+    )
+  ) {
+    query.destinationLat =
+      selectedDestination.value.lat;
+    query.destinationLng =
+      selectedDestination.value.lng;
+  }
+
+  router.push({
+    path: "/routes",
+    query,
+  });
+}
+
+function updateDestination(value) {
+  destination.value = value;
+
+  if (
+    selectedDestination.value?.address !==
+    value
+  ) {
+    selectedDestination.value = null;
+  }
+}
+
+function selectDestination(place) {
+  selectedDestination.value = place;
+  destination.value = place.address;
+}
+
+function handleAutocompleteError(error) {
+  console.warn(
+    "Address autocomplete unavailable; using text input fallback.",
+    error,
+  );
 }
 </script>
 
@@ -78,11 +126,13 @@ function findCalmRoute() {
           <div class="search-box">
             <Icon class="search-icon" name="search" :size="19" />
 
-            <input
-              v-model="destination"
-              type="text"
-              placeholder="Enter your destination"
-              @keyup.enter="findCalmRoute"
+            <AddressAutocomplete
+              class="address-field"
+              :model-value="destination"
+              @update:model-value="updateDestination"
+              @place-selected="selectDestination"
+              @submit="findCalmRoute"
+              @error="handleAutocompleteError"
             />
           </div>
 
@@ -270,6 +320,11 @@ function findCalmRoute() {
 
 .search-icon {
   color: var(--color-primary);
+}
+
+.address-field {
+  min-width: 0;
+  flex: 1;
 }
 
 .search-box input {

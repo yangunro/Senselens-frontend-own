@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -7,6 +9,7 @@ from app.models import User
 
 from app.routers.cbd_status import router as cbd_status_router
 from app.routers.preferences import router as preferences_router
+from app.routers.pedestrian import router as pedestrian_router
 from app.routers.refuges import router as refuges_router
 from app.routers.saved_routes import router as saved_routes_router
 from app.routers.routes import router as routes_router
@@ -35,9 +38,16 @@ app = FastAPI(
 #
 
 origins = [
-    "https://senselens.onrender.com",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    origin.strip()
+    for origin in os.getenv(
+        "FRONTEND_ORIGIN",
+        (
+            "https://senselens.onrender.com,"
+            "http://localhost:5173,"
+            "http://127.0.0.1:5173"
+        ),
+    ).split(",")
+    if origin.strip()
 ]
 
 
@@ -62,6 +72,11 @@ app.include_router(
 app.include_router(
     preferences_router,
     tags=["User Preferences"],
+)
+
+app.include_router(
+    pedestrian_router,
+    tags=["Pedestrian Data"],
 )
 
 app.include_router(

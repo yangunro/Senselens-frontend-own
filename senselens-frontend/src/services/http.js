@@ -1,4 +1,6 @@
-export const API_BASE = import.meta.env.VITE_API_BASE || "";
+export const API_BASE =
+  import.meta.env.VITE_API_BASE ||
+  "http://localhost:8000";
 
 // Simulates network latency for mock data so loading states are visible
 // during development. Remove call sites once real endpoints are wired up —
