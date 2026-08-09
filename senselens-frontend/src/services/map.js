@@ -121,7 +121,18 @@ export async function getRouteDetail(routeId) {
 
 export async function getQuietSpaces(routeId) {
   return withApiFallback(
-    () => apiGet(`/routes/${routeId}/quiet-spaces`),
+    async () => {
+      const real = await apiGet(`/routes/${routeId}/quiet-spaces`);
+      // Real shape (refugeId/name/lat/lng/category/distanceFromRouteM)
+      // doesn't line up with what the map marker rendering expects
+      // (id/label/lat/lng) — normalise rather than leaving marker titles blank.
+      return real.map((space) => ({
+        id: space.refugeId,
+        label: space.name,
+        lat: space.lat,
+        lng: space.lng,
+      }));
+    },
     async () => {
       await delay(450);
       return mockQuietSpaces;
