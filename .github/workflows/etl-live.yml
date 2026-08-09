@@ -1,0 +1,33 @@
+name: ETL - Live Pedestrian Counts
+
+on:
+  schedule:
+    # Every 15 minutes, matching the City of Melbourne source's
+    # own refresh cadence (per-minute counts published ~15 min).
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: etl-live-pedestrian
+  cancel-in-progress: false
+
+jobs:
+  sync-live-pedestrian:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: pip install -r requirements.txt
+
+      - run: python -m etl.sync_pedestrian_live

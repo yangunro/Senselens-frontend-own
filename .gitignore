@@ -35,3 +35,6 @@ GTFS_apitoken.rtf
 
 # Temporary files
 requirements-old.txt
+
+# One-time historical CSV bootstrap source (120MB, already loaded)
+pedestrian-counting-system-monthly-counts-per-hour.csv

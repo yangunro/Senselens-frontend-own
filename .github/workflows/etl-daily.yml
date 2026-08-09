@@ -1,0 +1,43 @@
+name: ETL - Daily Sync
+
+on:
+  schedule:
+    # 03:00 UTC = 13:00/14:00 Melbourne (AEST/AEDT), well outside
+    # City of Melbourne business hours to avoid contending with
+    # their own peak API traffic.
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: etl-daily
+  cancel-in-progress: false
+
+jobs:
+  sync-daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: pip install -r requirements.txt
+
+      # Resumes from ETLCheckpoint; does nothing if already
+      # up to date.
+      - name: Historical pedestrian counts (incremental)
+        run: python -m etl.sync_pedestrian_history
+
+      - name: Development activity
+        run: python -m etl.sync_development
+
+      - name: Street lights (CBD)
+        run: python -m etl.sync_streetlights

@@ -1,0 +1,37 @@
+name: ETL - Weekly Sync
+
+on:
+  schedule:
+    # 03:00 UTC every Monday. These sources change rarely
+    # (sensor install locations, CBD parks/libraries/cafes).
+    - cron: "0 3 * * 1"
+  workflow_dispatch: {}
+
+concurrency:
+  group: etl-weekly
+  cancel-in-progress: false
+
+jobs:
+  sync-weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: pip install -r requirements.txt
+
+      - name: Sensor locations
+        run: python -m etl.sync_sensor_locations
+
+      - name: Refuge locations (CBD parks, libraries, cafes)
+        run: python -m etl.sync_refuge
