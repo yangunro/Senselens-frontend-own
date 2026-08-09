@@ -94,16 +94,25 @@ export async function getRouteDetail(routeId) {
   );
 }
 
-// No backend endpoint for this yet (only /routes/{route_id} and
-// /routes/{route_id}/alerts exist) — stays mock-only until one exists.
 export async function getQuietSpaces(routeId) {
-  await delay(450);
-  return mockQuietSpaces;
+  return withApiFallback(
+    () => apiGet(`/routes/${routeId}/quiet-spaces`),
+    async () => {
+      await delay(450);
+      return mockQuietSpaces;
+    }
+  );
 }
 
 export async function getSensoryAlert(routeId) {
   return withApiFallback(
-    () => apiGet(`/routes/${routeId}/alerts`),
+    async () => {
+      const result = await apiGet(`/routes/${routeId}/alerts`);
+      // Backend currently returns a list (possibly empty) instead of a
+      // single alert-or-null — normalise here rather than waiting on that
+      // to change.
+      return Array.isArray(result) ? (result[0] ?? null) : result;
+    },
     async () => {
       await delay(600);
       return routeId === "quiet-flinders" ? null : mockAlert;
@@ -111,9 +120,14 @@ export async function getSensoryAlert(routeId) {
   );
 }
 
-// No backend endpoint for this yet (US 2.2 predictive alerts) — stays
-// mock-only until one exists.
 export async function getForecast(routeId) {
-  await delay(550);
-  return mockForecasts[routeId] ?? null;
+  return withApiFallback(
+    // Backend 404s instead of returning null when there's no forecast for
+    // this route — that's a valid "nothing to report" state, not a failure.
+    () => apiGet(`/routes/${routeId}/forecast`, { notFoundIsNull: true }),
+    async () => {
+      await delay(550);
+      return mockForecasts[routeId] ?? null;
+    }
+  );
 }

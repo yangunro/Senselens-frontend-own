@@ -7,8 +7,12 @@ export function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function apiGet(path) {
+export async function apiGet(path, { notFoundIsNull = false } = {}) {
   const res = await fetch(`${API_BASE}${path}`);
+  // Some endpoints (e.g. forecast) 404 instead of returning `null` when
+  // there's nothing to report for this route — that's a valid empty state,
+  // not a failure, so callers can opt in to treating it as one.
+  if (notFoundIsNull && res.status === 404) return null;
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
   return res.json();
 }
