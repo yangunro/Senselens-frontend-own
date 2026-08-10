@@ -7,7 +7,7 @@ import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import ProgressBar from "../components/ProgressBar.vue";
 import { getRouteDetail, getQuietSpaces, getSensoryAlert, getForecast, getPedestrianCounts } from "../services/map";
-import { getRouteOptions } from "../services/routes";
+import { FALLBACK_ORIGIN, getRouteOptions } from "../services/routes";
 import { watchCurrentLocation, getAccurateCurrentLocation } from "../services/geolocation";
 import { openExternalNavigation } from "../services/externalNavigation";
 import { usePreferences, toggleValue } from "../composables/usePreferences";
@@ -248,8 +248,17 @@ async function loadMap() {
   const destLng = Number(route.query.destLng);
   if (!routeId && route.query.destination && Number.isFinite(destLat) && Number.isFinite(destLng)) {
     loading.value = true;
+    // Live location isn't available (denied, unsupported, too inaccurate) —
+    // fall back to a fixed starting point rather than giving up on a route
+    // entirely, matching Routes.vue's same fallback for the Home search path.
+    let origin;
     try {
-      const origin = await getAccurateCurrentLocation();
+      origin = await getAccurateCurrentLocation();
+    } catch (err) {
+      console.warn("Live location unavailable, using approximate starting point:", err);
+      origin = FALLBACK_ORIGIN;
+    }
+    try {
       const options = await getRouteOptions(route.query.destination, { lat: destLat, lng: destLng }, origin);
       const recommended = options.find((option) => option.recommended) ?? options[0];
       if (recommended) routeId = recommended.id;
