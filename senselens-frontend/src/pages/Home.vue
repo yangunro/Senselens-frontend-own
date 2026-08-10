@@ -5,25 +5,15 @@ import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import { getCbdStatus } from "../services/home";
-
-const MELBOURNE_CBD = { lat: -37.8136, lng: 144.9631 };
+import { useMapboxSearch } from "../composables/useMapboxSearch";
 
 const router = useRouter();
-const destination = ref("");
-// Set only when the user actually picks a real place from the suggestion
-// dropdown — free-typed text with no selection has no coordinates, so route
-// generation falls back to geocoding the typed text instead (see Routes.vue).
-const destinationPoint = ref(null);
-const suggestions = ref([]);
-const showSuggestions = ref(false);
-// Mapbox bills/rate-limits by search session — one token per suggest→retrieve
-// cycle, then a fresh one for the next search.
-let sessionToken = crypto.randomUUID();
-let debounceTimer = null;
-// Tracks the in-flight coordinate lookup after picking a suggestion — tapping
-// "Find a calm route" before it resolves must wait for it, not race off with
-// a still-null destinationPoint.
-let pendingRetrieve = null;
+
+// Left blank, the route still starts from the user's live location (or the
+// Flinders St fallback if that's denied/unavailable) — same as before. Only
+// overrides it when the user actually types/picks a starting point.
+const origin = useMapboxSearch();
+const destination = useMapboxSearch();
 
 const cbdStatus = ref(null);
 const loading = ref(true);
@@ -33,75 +23,17 @@ onMounted(async () => {
   loading.value = false;
 });
 
-function onDestinationInput() {
-  destinationPoint.value = null;
-  showSuggestions.value = true;
-  window.clearTimeout(debounceTimer);
-  const query = destination.value.trim();
-  if (!query) {
-    suggestions.value = [];
-    return;
-  }
-  debounceTimer = window.setTimeout(() => fetchSuggestions(query), 250);
-}
-
-async function fetchSuggestions(query) {
-  try {
-    const params = new URLSearchParams({
-      q: query,
-      access_token: import.meta.env.VITE_MAPBOX_ACCESS_TOKEN,
-      session_token: sessionToken,
-      proximity: `${MELBOURNE_CBD.lng},${MELBOURNE_CBD.lat}`,
-      country: "au",
-      limit: "5",
-    });
-    const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/suggest?${params}`);
-    if (!res.ok) throw new Error(`Suggest failed: ${res.status}`);
-    const data = await res.json();
-    suggestions.value = data.suggestions ?? [];
-  } catch (err) {
-    // Suggestions are a nice-to-have — if the request fails, the plain text
-    // input still works via findCalmRoute's geocoding fallback.
-    console.warn("Destination suggestions unavailable:", err);
-    suggestions.value = [];
-  }
-}
-
-function selectSuggestion(suggestion) {
-  showSuggestions.value = false;
-  destination.value = suggestion.place_formatted
-    ? `${suggestion.name}, ${suggestion.place_formatted}`
-    : suggestion.name;
-  suggestions.value = [];
-  pendingRetrieve = (async () => {
-    try {
-      const params = new URLSearchParams({
-        access_token: import.meta.env.VITE_MAPBOX_ACCESS_TOKEN,
-        session_token: sessionToken,
-      });
-      const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/retrieve/${suggestion.mapbox_id}?${params}`);
-      if (!res.ok) throw new Error(`Retrieve failed: ${res.status}`);
-      const data = await res.json();
-      const coordinates = data.features?.[0]?.geometry?.coordinates;
-      if (coordinates) destinationPoint.value = { lat: coordinates[1], lng: coordinates[0] };
-    } catch (err) {
-      console.warn("Failed to resolve the selected place:", err);
-    } finally {
-      sessionToken = crypto.randomUUID();
-    }
-  })();
-}
-
 async function findCalmRoute() {
-  if (pendingRetrieve) {
-    await pendingRetrieve;
-    pendingRetrieve = null;
-  }
+  await Promise.all([origin.waitForPending(), destination.waitForPending()]);
   router.push({
     path: "/routes",
     query: {
-      destination: destination.value || "Collins Street",
-      ...(destinationPoint.value ? { destLat: destinationPoint.value.lat, destLng: destinationPoint.value.lng } : {}),
+      destination: destination.query.value || "Collins Street",
+      ...(destination.point.value
+        ? { destLat: destination.point.value.lat, destLng: destination.point.value.lng }
+        : {}),
+      ...(origin.query.value.trim() ? { origin: origin.query.value } : {}),
+      ...(origin.point.value ? { originLat: origin.point.value.lat, originLng: origin.point.value.lng } : {}),
     },
   });
 }
@@ -161,22 +93,46 @@ async function findCalmRoute() {
         <section class="search-section">
           <div class="search-wrap">
             <div class="search-box">
-              <Icon class="search-icon" name="search" :size="19" />
+              <Icon class="search-icon" name="tent" :size="19" />
 
               <input
-                v-model="destination"
+                v-model="origin.query.value"
                 type="text"
-                placeholder="Enter your destination"
+                placeholder="Starting point (optional — defaults to your location)"
                 autocomplete="off"
-                @input="onDestinationInput"
+                @input="origin.onInput"
                 @keyup.enter="findCalmRoute"
-                @focus="showSuggestions = true"
-                @blur="showSuggestions = false"
+                @focus="origin.showSuggestions.value = true"
+                @blur="origin.showSuggestions.value = false"
               />
             </div>
 
-            <ul v-if="showSuggestions && suggestions.length" class="suggestion-list">
-              <li v-for="s in suggestions" :key="s.mapbox_id" @mousedown.prevent="selectSuggestion(s)">
+            <ul v-if="origin.showSuggestions.value && origin.suggestions.value.length" class="suggestion-list">
+              <li v-for="s in origin.suggestions.value" :key="s.mapbox_id" @mousedown.prevent="origin.select(s)">
+                <strong>{{ s.name }}</strong>
+                <span v-if="s.place_formatted">{{ s.place_formatted }}</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="search-wrap search-wrap-destination">
+            <div class="search-box">
+              <Icon class="search-icon" name="search" :size="19" />
+
+              <input
+                v-model="destination.query.value"
+                type="text"
+                placeholder="Enter your destination"
+                autocomplete="off"
+                @input="destination.onInput"
+                @keyup.enter="findCalmRoute"
+                @focus="destination.showSuggestions.value = true"
+                @blur="destination.showSuggestions.value = false"
+              />
+            </div>
+
+            <ul v-if="destination.showSuggestions.value && destination.suggestions.value.length" class="suggestion-list">
+              <li v-for="s in destination.suggestions.value" :key="s.mapbox_id" @mousedown.prevent="destination.select(s)">
                 <strong>{{ s.name }}</strong>
                 <span v-if="s.place_formatted">{{ s.place_formatted }}</span>
               </li>
@@ -334,6 +290,10 @@ async function findCalmRoute() {
 
 .search-wrap {
   position: relative;
+}
+
+.search-wrap-destination {
+  margin-top: 10px;
 }
 
 .search-box {
