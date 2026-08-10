@@ -38,6 +38,10 @@ onMounted(async () => {
   refuges.value = await getRefuges();
   loading.value = false;
 });
+// Every refuge card jumps straight to /map — pre-download its chunk (which
+// includes the ~1.8MB Mapbox GL bundle) now instead of making the user wait
+// for it after they tap a card.
+import("../pages/Map.vue");
 </script>
 
 <template>

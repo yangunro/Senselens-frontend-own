@@ -50,15 +50,26 @@ let sensorMarkers = [];
 let currentLocationMarker = null;
 let stopLocationWatch = null;
 
+// Bakes transparency into the colour itself (rgba) rather than the element's
+// `opacity` CSS property — Mapbox GL's Marker silently resets `opacity` back
+// to 1 (its built-in occlusion-fade behaviour), so setting it directly never
+// sticks.
+function withAlpha(hex, alpha) {
+  if (alpha >= 1) return hex;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function createCircleElement(size, color, { strokeColor = "#fffdf9", strokeWidth = 3, opacity = 1 } = {}) {
   const el = document.createElement("div");
   el.style.width = `${size}px`;
   el.style.height = `${size}px`;
   el.style.borderRadius = "50%";
   el.style.boxSizing = "border-box";
-  el.style.background = color;
-  el.style.opacity = String(opacity);
-  el.style.border = `${strokeWidth}px solid ${strokeColor}`;
+  el.style.background = withAlpha(color, opacity);
+  el.style.border = `${strokeWidth}px solid ${withAlpha(strokeColor, opacity)}`;
   return el;
 }
 
@@ -109,7 +120,7 @@ function renderSensorMarkers() {
   sensorMarkers = pedestrianCounts.value.sensors.map((sensor) => {
     const ratio = sensor.minuteCount / max;
     const color = ratio > 0.66 ? "#b8563d" : ratio > 0.33 ? "#a97a1f" : "#2f8f6f";
-    const el = createCircleElement((6 + ratio * 6) * 2, color, { strokeColor: color, strokeWidth: 1, opacity: 0.3 });
+    const el = createCircleElement((6 + ratio * 6) * 2, color, { strokeColor: color, strokeWidth: 1, opacity: 0.4 });
     el.title = `${sensor.name}: ${sensor.minuteCount} pedestrians/min`;
     return new mapboxgl.Marker({ element: el }).setLngLat([sensor.lng, sensor.lat]).addTo(map);
   });

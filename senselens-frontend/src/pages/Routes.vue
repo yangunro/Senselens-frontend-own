@@ -96,6 +96,11 @@ async function loadRoutes() {
 }
 
 onMounted(loadRoutes);
+// Map.vue's chunk includes the ~1.8MB Mapbox GL bundle — kick off its
+// download now, while the user is still reading route options, so it's
+// already cached by the time they tap "Start calm route" instead of making
+// them wait for it on the next page.
+import("../pages/Map.vue");
 watch(() => [destination.value, destinationPoint.value], loadRoutes);
 
 function startCalmRoute() {
