@@ -4,70 +4,106 @@ import { useRouter } from "vue-router";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
-import AddressAutocomplete from "../components/AddressAutocomplete.vue";
-import { getCbdStatus, getSavedRoutes } from "../services/home";
+import { getCbdStatus } from "../services/home";
+
+const MELBOURNE_CBD = { lat: -37.8136, lng: 144.9631 };
 
 const router = useRouter();
 const destination = ref("");
-const selectedDestination = ref(null);
+// Set only when the user actually picks a real place from the suggestion
+// dropdown — free-typed text with no selection has no coordinates, so route
+// generation falls back to geocoding the typed text instead (see Routes.vue).
+const destinationPoint = ref(null);
+const suggestions = ref([]);
+const showSuggestions = ref(false);
+// Mapbox bills/rate-limits by search session — one token per suggest→retrieve
+// cycle, then a fresh one for the next search.
+let sessionToken = crypto.randomUUID();
+let debounceTimer = null;
+// Tracks the in-flight coordinate lookup after picking a suggestion — tapping
+// "Find a calm route" before it resolves must wait for it, not race off with
+// a still-null destinationPoint.
+let pendingRetrieve = null;
 
 const cbdStatus = ref(null);
-const savedRoutes = ref([]);
 const loading = ref(true);
 
 onMounted(async () => {
-  [cbdStatus.value, savedRoutes.value] = await Promise.all([getCbdStatus(), getSavedRoutes()]);
+  cbdStatus.value = await getCbdStatus();
   loading.value = false;
 });
 
-function findCalmRoute() {
-  const query = {
-    destination:
-      destination.value ||
-      "Collins Street",
-  };
-
-  if (
-    Number.isFinite(
-      selectedDestination.value?.lat,
-    ) &&
-    Number.isFinite(
-      selectedDestination.value?.lng,
-    )
-  ) {
-    query.destinationLat =
-      selectedDestination.value.lat;
-    query.destinationLng =
-      selectedDestination.value.lng;
+function onDestinationInput() {
+  destinationPoint.value = null;
+  showSuggestions.value = true;
+  window.clearTimeout(debounceTimer);
+  const query = destination.value.trim();
+  if (!query) {
+    suggestions.value = [];
+    return;
   }
+  debounceTimer = window.setTimeout(() => fetchSuggestions(query), 250);
+}
 
+async function fetchSuggestions(query) {
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      access_token: import.meta.env.VITE_MAPBOX_ACCESS_TOKEN,
+      session_token: sessionToken,
+      proximity: `${MELBOURNE_CBD.lng},${MELBOURNE_CBD.lat}`,
+      country: "au",
+      limit: "5",
+    });
+    const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/suggest?${params}`);
+    if (!res.ok) throw new Error(`Suggest failed: ${res.status}`);
+    const data = await res.json();
+    suggestions.value = data.suggestions ?? [];
+  } catch (err) {
+    // Suggestions are a nice-to-have — if the request fails, the plain text
+    // input still works via findCalmRoute's geocoding fallback.
+    console.warn("Destination suggestions unavailable:", err);
+    suggestions.value = [];
+  }
+}
+
+function selectSuggestion(suggestion) {
+  showSuggestions.value = false;
+  destination.value = suggestion.place_formatted
+    ? `${suggestion.name}, ${suggestion.place_formatted}`
+    : suggestion.name;
+  suggestions.value = [];
+  pendingRetrieve = (async () => {
+    try {
+      const params = new URLSearchParams({
+        access_token: import.meta.env.VITE_MAPBOX_ACCESS_TOKEN,
+        session_token: sessionToken,
+      });
+      const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/retrieve/${suggestion.mapbox_id}?${params}`);
+      if (!res.ok) throw new Error(`Retrieve failed: ${res.status}`);
+      const data = await res.json();
+      const coordinates = data.features?.[0]?.geometry?.coordinates;
+      if (coordinates) destinationPoint.value = { lat: coordinates[1], lng: coordinates[0] };
+    } catch (err) {
+      console.warn("Failed to resolve the selected place:", err);
+    } finally {
+      sessionToken = crypto.randomUUID();
+    }
+  })();
+}
+
+async function findCalmRoute() {
+  if (pendingRetrieve) {
+    await pendingRetrieve;
+    pendingRetrieve = null;
+  }
   router.push({
     path: "/routes",
-    query,
+    query: {
+      destination: destination.value || "Collins Street",
+      ...(destinationPoint.value ? { destLat: destinationPoint.value.lat, destLng: destinationPoint.value.lng } : {}),
+    },
   });
-}
-
-function updateDestination(value) {
-  destination.value = value;
-
-  if (
-    selectedDestination.value?.address !==
-    value
-  ) {
-    selectedDestination.value = null;
-  }
-}
-
-function selectDestination(place) {
-  selectedDestination.value = place;
-  destination.value = place.address;
-}
-
-function handleAutocompleteError(error) {
-  console.warn(
-    "Address autocomplete unavailable; using text input fallback.",
-    error,
-  );
 }
 </script>
 
@@ -123,17 +159,28 @@ function handleAutocompleteError(error) {
         </section>
 
         <section class="search-section">
-          <div class="search-box">
-            <Icon class="search-icon" name="search" :size="19" />
+          <div class="search-wrap">
+            <div class="search-box">
+              <Icon class="search-icon" name="search" :size="19" />
 
-            <AddressAutocomplete
-              class="address-field"
-              :model-value="destination"
-              @update:model-value="updateDestination"
-              @place-selected="selectDestination"
-              @submit="findCalmRoute"
-              @error="handleAutocompleteError"
-            />
+              <input
+                v-model="destination"
+                type="text"
+                placeholder="Enter your destination"
+                autocomplete="off"
+                @input="onDestinationInput"
+                @keyup.enter="findCalmRoute"
+                @focus="showSuggestions = true"
+                @blur="showSuggestions = false"
+              />
+            </div>
+
+            <ul v-if="showSuggestions && suggestions.length" class="suggestion-list">
+              <li v-for="s in suggestions" :key="s.mapbox_id" @mousedown.prevent="selectSuggestion(s)">
+                <strong>{{ s.name }}</strong>
+                <span v-if="s.place_formatted">{{ s.place_formatted }}</span>
+              </li>
+            </ul>
           </div>
 
           <button class="search-button" @click="findCalmRoute">
@@ -143,26 +190,6 @@ function handleAutocompleteError(error) {
       </div>
 
       <aside class="side-column">
-        <section class="saved-section">
-          <h2>SAVED ROUTES</h2>
-
-          <div v-if="loading" class="saved-routes">
-            <SkeletonBlock width="128px" height="38px" radius="999px" />
-            <SkeletonBlock width="128px" height="38px" radius="999px" />
-          </div>
-          <div v-else class="saved-routes">
-            <button
-              v-for="route in savedRoutes"
-              :key="route.label"
-              class="route-pill"
-              @click="router.push({ path: '/routes', query: { destination: route.destination } })"
-            >
-              <Icon name="heart" :size="15" />
-              {{ route.label }}
-            </button>
-          </div>
-        </section>
-
         <section class="info-card">
           <span class="info-label">Plan ahead</span>
           <h3>Travel when conditions feel calmer</h3>
@@ -305,6 +332,10 @@ function handleAutocompleteError(error) {
   margin-top: 20px;
 }
 
+.search-wrap {
+  position: relative;
+}
+
 .search-box {
   display: flex;
   align-items: center;
@@ -322,11 +353,6 @@ function handleAutocompleteError(error) {
   color: var(--color-primary);
 }
 
-.address-field {
-  min-width: 0;
-  flex: 1;
-}
-
 .search-box input {
   width: 100%;
   height: 56px;
@@ -341,6 +367,52 @@ function handleAutocompleteError(error) {
 
 .search-box input::placeholder {
   color: var(--color-text-faint);
+}
+
+.suggestion-list {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+
+  overflow: hidden;
+
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.suggestion-list li {
+  padding: 11px 16px;
+
+  cursor: pointer;
+}
+
+.suggestion-list li:not(:last-child) {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.suggestion-list li:hover {
+  background: var(--color-surface-muted);
+}
+
+.suggestion-list strong {
+  display: block;
+
+  color: var(--color-text);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.suggestion-list span {
+  display: block;
+
+  margin-top: 2px;
+
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 .search-button {
@@ -369,47 +441,6 @@ function handleAutocompleteError(error) {
 
 .side-column {
   margin-top: 28px;
-}
-
-.saved-section h2 {
-  margin: 0 0 12px;
-
-  color: var(--color-text-muted);
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-.saved-routes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.route-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  padding: 11px 15px;
-
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
-
-  color: var(--color-text);
-  font-size: 12.5px;
-  font-weight: 600;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.route-pill:hover {
-  background: var(--color-primary-soft);
-  border-color: var(--color-primary-soft);
-}
-
-.route-pill :deep(.sl-icon) {
-  color: var(--color-primary);
 }
 
 .info-card {
@@ -530,23 +561,9 @@ function handleAutocompleteError(error) {
     margin-top: 0;
   }
 
-  .saved-routes {
-    flex-direction: column;
-  }
-
-  .route-pill {
-    width: 100%;
-    justify-content: flex-start;
-
-    padding: 13px 16px;
-
-    border-radius: var(--radius-sm);
-  }
-
   .info-card {
     display: block;
 
-    margin-top: 26px;
     padding: 24px;
 
     background: var(--color-surface);

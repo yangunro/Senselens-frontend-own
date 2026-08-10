@@ -1,4 +1,4 @@
-import { delay } from "./http";
+import { apiGet, delay, withApiFallback } from "./http";
 
 const mockRefuges = [
   {
@@ -35,8 +35,31 @@ const mockRefuges = [
   },
 ];
 
+const ICON_BY_CATEGORY = {
+  Library: "book",
+  Park: "tree",
+  Cafe: "coffee",
+};
+
 export async function getRefuges() {
-  // TODO: replace with apiGet("/refuges")
-  await delay(450);
-  return mockRefuges;
+  return withApiFallback(
+    async () => {
+      const real = await apiGet("/refuges");
+      // Real shape (refugeId/category/lat/lng/sourceDataset/quietScore)
+      // doesn't line up with the mock's (id/type/icon/distance/note) —
+      // normalise rather than rewriting the page around two shapes.
+      return real.map((refuge) => ({
+        id: refuge.refugeId,
+        name: refuge.name,
+        type: refuge.category,
+        icon: ICON_BY_CATEGORY[refuge.category] ?? "refuge",
+        lat: refuge.lat,
+        lng: refuge.lng,
+      }));
+    },
+    async () => {
+      await delay(450);
+      return mockRefuges;
+    }
+  );
 }

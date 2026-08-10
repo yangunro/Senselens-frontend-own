@@ -1,141 +1,184 @@
-const API_BASE =
-  import.meta.env.VITE_API_BASE ||
-  "http://localhost:8000";
+import { apiGet, delay, withApiFallback } from "./http";
+import { decodePolyline } from "./polyline";
 
-async function request(path) {
-  console.log(
-    "[SenseLens API] requesting:",
-    `${API_BASE}${path}`,
-  );
+const mockRouteDetails = {
+  "quiet-flinders": {
+    name: "Quiet Route",
+    level: "low",
+    levelLabel: "LOW SENSORY",
+    duration: "18 min",
+    distance: "1.2 km",
+    progress: 35,
+    factors: [],
+    transit: { stop: "Flinders Street Station", type: "train", walk: "4 min" },
+    alternativeId: null,
+    // Illustrative waypoints (not a real routed path) — plotted on the Google Map.
+    path: [
+      { lat: -37.8183, lng: 144.9671 }, // Flinders Street Station
+      { lat: -37.814, lng: 144.9663 },
+      { lat: -37.8099, lng: 144.9656 }, // near State Library Victoria
+    ],
+  },
+  "balanced-collins": {
+    name: "Balanced Route",
+    level: "medium",
+    levelLabel: "MEDIUM SENSORY",
+    duration: "14 min",
+    distance: "1.0 km",
+    progress: 35,
+    factors: [{ icon: "users", label: "Moderate pedestrian volume near retail zone" }],
+    transit: { stop: "Collins St/Elizabeth St", type: "tram", walk: "2 min" },
+    alternativeId: "quiet-flinders",
+    path: [
+      { lat: -37.8183, lng: 144.9671 }, // Flinders Street Station
+      { lat: -37.8168, lng: 144.965 },
+      { lat: -37.8155, lng: 144.9631 }, // Collins St / Elizabeth St
+    ],
+  },
+  "direct-bourke": {
+    name: "Direct Route",
+    level: "high",
+    levelLabel: "HIGH SENSORY",
+    duration: "12 min",
+    distance: "0.9 km",
+    progress: 35,
+    factors: [
+      { icon: "users", label: "Very dense crowds" },
+      { icon: "megaphone", label: "Street performances" },
+    ],
+    transit: { stop: "Melbourne Central Station", type: "train", walk: "3 min" },
+    alternativeId: "quiet-flinders",
+    path: [
+      { lat: -37.8183, lng: 144.9671 }, // Flinders Street Station
+      { lat: -37.8145, lng: 144.966 },
+      { lat: -37.8103, lng: 144.9628 }, // Bourke St Mall / Melbourne Central
+    ],
+  },
+};
 
-  const response = await fetch(
-    `${API_BASE}${path}`,
-  );
+// Predictive alerts (US 2.2): the route's overall crowd level forecast one
+// hour from now, derived from historical pedestrian trend data on the backend.
+const mockForecasts = {
+  "quiet-flinders": null,
+  "balanced-collins": {
+    levelLabel: "MEDIUM SENSORY",
+    level: "medium",
+    basis: "Pedestrian traffic near Collins St intersection is trending up and may get busier within the hour, based on historical patterns.",
+  },
+  "direct-bourke": {
+    levelLabel: "HIGH SENSORY",
+    level: "high",
+    basis: "Crowd levels near Bourke St Mall are forecast to peak within the hour, based on historical patterns.",
+  },
+};
 
-  if (!response.ok) {
-    const text = await response.text();
+const mockQuietSpaces = [
+  { id: 1, label: "State Library Victoria", lat: -37.8099, lng: 144.9656 },
+  { id: 2, label: "Flagstaff Gardens", lat: -37.8095, lng: 144.9531 },
+  { id: 3, label: "Treasury Gardens", lat: -37.8115, lng: 144.9793 },
+];
 
-    throw new Error(
-      `Backend request failed: ${response.status} ${text}`,
-    );
-  }
+const mockAlert = {
+  title: "Busy area ahead near Bourke St",
+  message: "A quieter path is available.",
+};
 
-  return response.json();
-}
+const mockPedestrianCounts = {
+  observedAt: new Date().toISOString(),
+  sensorCount: 4,
+  totalCount: 42,
+  averageCount: 10.5,
+  maximumCount: 20,
+  sensors: [
+    { sensorId: 1, name: "Flinders Street Station", minuteCount: 20, lat: -37.8183, lng: 144.9671 },
+    { sensorId: 2, name: "Melbourne Central", minuteCount: 12, lat: -37.811, lng: 144.9643 },
+    { sensorId: 3, name: "Collins Street", minuteCount: 7, lat: -37.8155, lng: 144.9631 },
+    { sensorId: 4, name: "Bourke St Mall", minuteCount: 3, lat: -37.8136, lng: 144.9648 },
+  ],
+};
 
-/**
- * 获取多条路线
- */
-export async function getRoutes(
-  destination,
-  origin = null,
-  destinationLocation = null,
-) {
-  const params = new URLSearchParams();
-
-  params.set("destination", destination);
-
-  if (origin) {
-    params.set(
-      "originLat",
-      origin.lat,
-    );
-
-    params.set(
-      "originLng",
-      origin.lng,
-    );
-  }
-
-  if (destinationLocation) {
-    params.set(
-      "destinationLat",
-      destinationLocation.lat,
-    );
-
-    params.set(
-      "destinationLng",
-      destinationLocation.lng,
-    );
-  }
-
-  return request(
-    `/routes?${params.toString()}`,
-  );
-}
-
-/**
- * 获取当前路线详情
- */
-export async function getRouteDetail(
-  routeId,
-) {
-  if (!routeId) {
-    throw new Error(
-      "routeId is required",
-    );
-  }
-
-  return request(
-    `/routes/${encodeURIComponent(
-      routeId,
-    )}`,
-  );
-}
-
-/**
- * 获取 quiet spaces
- */
-export async function getQuietSpaces(
-  routeId,
-) {
-  if (!routeId) {
-    throw new Error(
-      "routeId is required",
-    );
-  }
-
-  return request(
-    `/routes/${encodeURIComponent(
-      routeId,
-    )}/quiet-spaces`,
-  );
-}
-
-/**
- * 获取当前 sensory alert
- */
-export async function getSensoryAlert(
-  routeId,
-) {
-  if (!routeId) {
-    throw new Error(
-      "routeId is required",
-    );
-  }
-
-  return request(
-    `/routes/${encodeURIComponent(
-      routeId,
-    )}/alerts`,
+export async function getRouteDetail(routeId) {
+  return withApiFallback(
+    async () => {
+      const real = await apiGet(`/routes/${routeId}`);
+      // Real routes carry an encoded `polyline` instead of a plain path —
+      // decode it into the {lat, lng}[] shape the map already draws.
+      // Falls back to a straight line between the two endpoints if for some
+      // reason there's no polyline.
+      const path = real.polyline
+        ? decodePolyline(real.polyline)
+        : [real.origin, real.destination].filter(Boolean);
+      return { ...real, path };
+    },
+    async () => {
+      await delay(300);
+      return mockRouteDetails[routeId] ?? mockRouteDetails["quiet-flinders"];
+    }
   );
 }
 
-/**
- * 获取 forecast
- */
-export async function getRouteForecast(
-  routeId,
-) {
-  if (!routeId) {
-    throw new Error(
-      "routeId is required",
-    );
-  }
+export async function getQuietSpaces(routeId) {
+  return withApiFallback(
+    async () => {
+      const real = await apiGet(`/routes/${routeId}/quiet-spaces`);
+      // Real shape (refugeId/name/lat/lng/category/distanceFromRouteM)
+      // doesn't line up with what the map marker rendering expects
+      // (id/label/lat/lng) — normalise rather than leaving marker titles blank.
+      return real.map((space) => ({
+        id: space.refugeId,
+        label: space.name,
+        lat: space.lat,
+        lng: space.lng,
+      }));
+    },
+    async () => {
+      await delay(450);
+      return mockQuietSpaces;
+    }
+  );
+}
 
-  return request(
-    `/routes/${encodeURIComponent(
-      routeId,
-    )}/forecast`,
+export async function getSensoryAlert(routeId) {
+  return withApiFallback(
+    async () => {
+      const result = await apiGet(`/routes/${routeId}/alerts`);
+      // Backend currently returns a list (possibly empty) instead of a
+      // single alert-or-null — normalise here rather than waiting on that
+      // to change.
+      return Array.isArray(result) ? (result[0] ?? null) : result;
+    },
+    async () => {
+      await delay(600);
+      return routeId === "quiet-flinders" ? null : mockAlert;
+    }
+  );
+}
+
+export async function getPedestrianCounts() {
+  return withApiFallback(
+    () => apiGet("/pedestrian-counts/latest"),
+    async () => {
+      await delay(400);
+      return mockPedestrianCounts;
+    }
+  );
+}
+
+export async function getForecast(routeId) {
+  return withApiFallback(
+    async () => {
+      // Backend 404s instead of returning null when there's no forecast for
+      // this route — that's a valid "nothing to report" state, not a failure.
+      const real = await apiGet(`/routes/${routeId}/forecast`, { notFoundIsNull: true });
+      if (!real) return null;
+      // Real shape is a single next-hour crowd-level prediction for the whole
+      // route (level/basis) — not the area+ETA-range the UI was originally
+      // written for.
+      return { levelLabel: real.sensoryIndicator, level: real.level, basis: real.basis };
+    },
+    async () => {
+      await delay(550);
+      return mockForecasts[routeId] ?? null;
+    }
   );
 }

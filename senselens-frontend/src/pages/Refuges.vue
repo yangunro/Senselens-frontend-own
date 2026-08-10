@@ -1,17 +1,31 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
+import { useRouter } from "vue-router";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import SegmentedTabs from "../components/SegmentedTabs.vue";
 import { getRefuges } from "../services/refuges";
 
+const router = useRouter();
 const refuges = ref([]);
 const loading = ref(true);
 const filter = ref("all");
 
+// Refuges already have real coordinates — send the user straight to the map
+// with a route generated live from their current location, instead of
+// making them re-pick from the Routes page (they already know where
+// they're going, they just clicked it).
+function navigateTo(refuge) {
+  router.push({
+    path: "/map",
+    query: { destination: refuge.name, destLat: refuge.lat, destLng: refuge.lng },
+  });
+}
+
 const filterOptions = [
   { value: "all", label: "All" },
+  { value: "Cafe", label: "Cafes" },
   { value: "Library", label: "Libraries" },
   { value: "Park", label: "Parks" },
 ];
@@ -24,6 +38,10 @@ onMounted(async () => {
   refuges.value = await getRefuges();
   loading.value = false;
 });
+// Every refuge card jumps straight to /map — pre-download its chunk (which
+// includes the ~1.8MB Mapbox GL bundle) now instead of making the user wait
+// for it after they tap a card.
+import("../pages/Map.vue");
 </script>
 
 <template>
@@ -48,7 +66,13 @@ onMounted(async () => {
     </div>
 
     <div v-else-if="filteredRefuges.length" class="refuge-list">
-      <article v-for="refuge in filteredRefuges" :key="refuge.id" class="refuge-card">
+      <button
+        v-for="refuge in filteredRefuges"
+        :key="refuge.id"
+        type="button"
+        class="refuge-card"
+        @click="navigateTo(refuge)"
+      >
         <div class="refuge-icon">
           <Icon :name="refuge.icon" :size="20" />
         </div>
@@ -56,13 +80,13 @@ onMounted(async () => {
         <div class="refuge-body">
           <div class="refuge-top">
             <h2>{{ refuge.name }}</h2>
-            <span class="distance">{{ refuge.distance }}</span>
+            <span v-if="refuge.distance" class="distance">{{ refuge.distance }}</span>
           </div>
 
           <span class="refuge-type">{{ refuge.type }}</span>
-          <p>{{ refuge.note }}</p>
+          <p v-if="refuge.note">{{ refuge.note }}</p>
         </div>
-      </article>
+      </button>
     </div>
 
     <p v-else class="empty-state">No refuges in this category yet.</p>

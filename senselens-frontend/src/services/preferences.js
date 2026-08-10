@@ -1,18 +1,8 @@
-import { delay } from "./http";
+import { apiGet, apiPost, delay, withApiFallback } from "./http";
 
 const defaultPreferences = {
-  sliders: [
-    { key: "noise", label: "Noise sensitivity", value: 1 },
-    { key: "crowd", label: "Crowd sensitivity", value: 0 },
-    { key: "light", label: "Bright light sensitivity", value: 2 },
-  ],
+  sliders: [{ key: "crowd", label: "Crowd sensitivity", value: 0 }],
   toggles: [
-    {
-      key: "construction",
-      label: "Avoid construction zones",
-      note: "Steer routes away from sudden loud sounds or dust.",
-      value: true,
-    },
     {
       key: "refuges",
       label: "Always show refuge spaces",
@@ -21,21 +11,29 @@ const defaultPreferences = {
     },
     {
       key: "contrast",
-      label: "High contrast / reduced motion mode",
-      note: "Use stronger colors and fewer animations for comfort.",
-      value: true,
+      label: "High contrast mode",
+      note: "Increase contrast to make text and interface elements easier to distinguish.",
+      value: false,
     },
   ],
 };
 
 export async function getPreferences() {
-  // TODO: replace with apiGet("/preferences")
-  await delay(350);
-  return defaultPreferences;
+  return withApiFallback(
+    () => apiGet("/preferences"),
+    async () => {
+      await delay(350);
+      return defaultPreferences;
+    }
+  );
 }
 
 export async function savePreferences(preferences) {
-  // TODO: replace with apiPost("/preferences", preferences)
-  await delay(500);
-  return { ok: true };
+  return withApiFallback(
+    () => apiPost("/preferences", preferences),
+    async () => {
+      await delay(500);
+      return { ok: true };
+    }
+  );
 }

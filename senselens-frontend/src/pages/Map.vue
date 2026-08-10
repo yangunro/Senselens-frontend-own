@@ -1,241 +1,428 @@
 <script setup>
-import {
-  ref,
-  watch,
-  onMounted,
-  onBeforeUnmount,
-} from "vue";
-import { useRoute } from "vue-router";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import mapboxgl from "../services/mapbox";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import ProgressBar from "../components/ProgressBar.vue";
-import {
-  getRoutes,
-  getRouteDetail,
-  getQuietSpaces,
-  getSensoryAlert,
-} from "../services/map";
-import {
-  getAccurateCurrentLocation,
-  watchCurrentLocation,
-} from "../services/geolocation";
-import RouteMap from "../components/RouteMap.vue";
+import { getRouteDetail, getQuietSpaces, getSensoryAlert, getForecast, getPedestrianCounts } from "../services/map";
+import { getRouteOptions } from "../services/routes";
+import { watchCurrentLocation, getAccurateCurrentLocation } from "../services/geolocation";
+import { usePreferences, toggleValue } from "../composables/usePreferences";
+
 const route = useRoute();
-const errorMessage = ref("");
+const router = useRouter();
+const preferences = usePreferences();
+
 const activeRoute = ref(null);
 const quietSpaces = ref([]);
 const alert = ref(null);
+const forecast = ref(null);
+const pedestrianCounts = ref(null);
 const alertDismissed = ref(false);
 const loading = ref(true);
-const currentLocation = ref(null);
 
+const MELBOURNE_CBD = { lat: -37.8136, lng: 144.9631 };
+
+// A calm, round marker for refuge/quiet-space pins — Google's default red teardrop
+// pin reads as an alert, which fights the "this is a safe, calming spot" message.
+const REFUGE_ICON_URL =
+  "data:image/svg+xml;charset=UTF-8," +
+  encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34">
+      <circle cx="17" cy="17" r="14" fill="#fffdf9" stroke="#2f6f5f" stroke-width="2"/>
+      <g transform="translate(9,9)" stroke="#2f6f5f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <path d="M8 2 2 14h12L8 2Z"/>
+        <line x1="6" y1="14" x2="8" y2="9"/>
+        <line x1="10" y1="14" x2="8" y2="9"/>
+      </g>
+    </svg>
+  `);
+
+const mapEl = ref(null);
+const mapReady = ref(false);
+const mapError = ref(false);
+let map = null;
+let startMarker = null;
+let refugeMarkers = [];
+let sensorMarkers = [];
+let currentLocationMarker = null;
 let stopLocationWatch = null;
 
-async function loadMap() {
-  let routeId = route.query.route;
+// Bakes transparency into the colour itself (rgba) rather than the element's
+// `opacity` CSS property — Mapbox GL's Marker silently resets `opacity` back
+// to 1 (its built-in occlusion-fade behaviour), so setting it directly never
+// sticks.
+function withAlpha(hex, alpha) {
+  if (alpha >= 1) return hex;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
-  loading.value = true;
-  errorMessage.value = "";
-  alertDismissed.value = false;
+function createCircleElement(size, color, { strokeColor = "#fffdf9", strokeWidth = 3, opacity = 1 } = {}) {
+  const el = document.createElement("div");
+  el.style.width = `${size}px`;
+  el.style.height = `${size}px`;
+  el.style.borderRadius = "50%";
+  el.style.boxSizing = "border-box";
+  el.style.background = withAlpha(color, opacity);
+  el.style.border = `${strokeWidth}px solid ${withAlpha(strokeColor, opacity)}`;
+  return el;
+}
 
-  try {
-    if (!routeId) {
-      const origin =
-        currentLocation.value ||
-        await getAccurateCurrentLocation();
-
-      currentLocation.value = origin;
-
-      const routes = await getRoutes(
-        route.query.destination || "Collins Street",
-        origin,
-        Number.isFinite(
-          Number(route.query.destinationLat),
-        ) &&
-          Number.isFinite(
-            Number(route.query.destinationLng),
-          )
-          ? {
-              lat: Number(
-                route.query.destinationLat,
-              ),
-              lng: Number(
-                route.query.destinationLng,
-              ),
-            }
-          : null,
-      );
-
-      const recommendedRoute =
-        routes.find((item) => item.recommended) || routes[0];
-
-      if (!recommendedRoute) {
-        throw new Error("No route is available.");
-      }
-
-      routeId = recommendedRoute.id;
+function initMap() {
+  return new Promise((resolve) => {
+    try {
+      map = new mapboxgl.Map({
+        container: mapEl.value,
+        style: "mapbox://styles/mapbox/streets-v12",
+        center: [MELBOURNE_CBD.lng, MELBOURNE_CBD.lat],
+        zoom: 15,
+      });
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+      map.once("load", () => {
+        mapReady.value = true;
+        resolve();
+      });
+      map.once("error", (err) => {
+        console.error("Mapbox failed to load", err);
+        mapError.value = true;
+        resolve();
+      });
+    } catch (err) {
+      console.error("Mapbox failed to load", err);
+      mapError.value = true;
+      resolve();
     }
+  });
+}
 
-    const [routeDetail, spaces, alerts] =
-      await Promise.all([
-        getRouteDetail(routeId),
-        getQuietSpaces(routeId),
-        getSensoryAlert(routeId),
-      ]);
+function clearRefugeMarkers() {
+  refugeMarkers.forEach((marker) => marker.remove());
+  refugeMarkers = [];
+}
 
-    activeRoute.value = routeDetail;
-    quietSpaces.value = spaces;
-    alert.value = Array.isArray(alerts)
-      ? alerts[0] ?? null
-      : alerts;
-  } catch (error) {
-    console.error("Unable to load map:", error);
+function clearSensorMarkers() {
+  sensorMarkers.forEach((marker) => marker.remove());
+  sensorMarkers = [];
+}
 
-    activeRoute.value = null;
-    quietSpaces.value = [];
-    alert.value = null;
+// Real-time pedestrian sensor readings, colour-coded on the same low/medium/high
+// scale as everything else in the app — relative to today's busiest sensor.
+function renderSensorMarkers() {
+  clearSensorMarkers();
+  if (!map || !pedestrianCounts.value?.sensors?.length) return;
 
-    errorMessage.value =
-      error.message || "Unable to load the map.";
-  } finally {
-    loading.value = false;
+  const max = pedestrianCounts.value.maximumCount || 1;
+  sensorMarkers = pedestrianCounts.value.sensors.map((sensor) => {
+    const ratio = sensor.minuteCount / max;
+    const color = ratio > 0.66 ? "#b8563d" : ratio > 0.33 ? "#a97a1f" : "#2f8f6f";
+    const el = createCircleElement((6 + ratio * 6) * 2, color, { strokeColor: color, strokeWidth: 1, opacity: 0.4 });
+    el.title = `${sensor.name}: ${sensor.minuteCount} pedestrians/min`;
+    return new mapboxgl.Marker({ element: el }).setLngLat([sensor.lng, sensor.lat]).addTo(map);
+  });
+}
+
+// Classic "blue dot" — distinct from the green route-start marker so it
+// reads as "you, right now" rather than "where this route begins".
+function renderCurrentLocationMarker(position) {
+  if (!map) return;
+  currentLocationMarker?.remove();
+  const el = createCircleElement(14, "#4285f4");
+  el.title = `Your location (±${Math.round(position.accuracy)} m)`;
+  currentLocationMarker = new mapboxgl.Marker({ element: el }).setLngLat([position.lng, position.lat]).addTo(map);
+}
+
+// Route path is drawn as a GeoJSON line layer rather than a Marker-style
+// polyline object — Mapbox GL has no Polyline class, sources/layers are how
+// any line gets drawn, and both need the map's style to be loaded first.
+function setRouteLine(path) {
+  if (!map || !mapReady.value) return;
+  const geojson = {
+    type: "Feature",
+    geometry: { type: "LineString", coordinates: path.map((point) => [point.lng, point.lat]) },
+  };
+  if (map.getSource("route")) {
+    map.getSource("route").setData(geojson);
+  } else if (path.length) {
+    map.addSource("route", { type: "geojson", data: geojson });
+    map.addLayer({
+      id: "route-line",
+      type: "line",
+      source: "route",
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": "#2f6f5f", "line-width": 5, "line-opacity": 0.85 },
+    });
   }
 }
 
-onMounted(async () => {
-  await loadMap();
+function renderMapLayer() {
+  if (!map || !activeRoute.value) return;
 
-  stopLocationWatch =
-    watchCurrentLocation(
-      (position) => {
-        currentLocation.value = position;
-      },
-      (error) => {
-        console.warn(
-          "Live location update failed:",
-          error,
-        );
-      },
-    );
+  const path = activeRoute.value.path ?? [];
+
+  setRouteLine(path);
+
+  startMarker?.remove();
+  if (path.length) {
+    const el = createCircleElement(16, "#2f6f5f");
+    el.title = "Start";
+    startMarker = new mapboxgl.Marker({ element: el }).setLngLat([path[0].lng, path[0].lat]).addTo(map);
+  }
+
+  clearRefugeMarkers();
+  if (showRefuges.value) {
+    refugeMarkers = quietSpaces.value.map((space) => {
+      const el = document.createElement("div");
+      el.style.width = "34px";
+      el.style.height = "34px";
+      el.style.backgroundImage = `url("${REFUGE_ICON_URL}")`;
+      el.style.backgroundSize = "contain";
+      el.title = space.label;
+      return new mapboxgl.Marker({ element: el }).setLngLat([space.lng, space.lat]).addTo(map);
+    });
+  }
+
+  const bounds = new mapboxgl.LngLatBounds();
+  path.forEach((point) => bounds.extend([point.lng, point.lat]));
+  if (showRefuges.value) {
+    quietSpaces.value.forEach((space) => bounds.extend([space.lng, space.lat]));
+  }
+  if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 48 });
+}
+
+// "Always show refuge spaces" preference — when off, quiet-space markers stay off the map.
+const showRefuges = computed(() => toggleValue(preferences, "refuges", true));
+
+// How much crowding the user can tolerate before a route counts as "too busy" —
+// derived from their crowd-sensitivity preference (0 low sensitivity/high tolerance
+// … 2 high sensitivity/low tolerance).
+const crowdTolerance = computed(() => {
+  const crowdSlider = preferences.sliders.find((slider) => slider.key === "crowd");
+  return crowdSlider ? 2 - crowdSlider.value : 2;
 });
+const levelRank = { low: 0, medium: 1, high: 2 };
+
+const crowdExceeded = computed(
+  () => !!activeRoute.value && levelRank[activeRoute.value.level] > crowdTolerance.value
+);
+
+// Prioritise a personalised "this route is busier than you like" banner over the
+// generic conditions alert — both drive users toward the calmer alternativeId route.
+const activeBanner = computed(() => {
+  if (alertDismissed.value) return null;
+  if (crowdExceeded.value) {
+    return {
+      title: "This route is busier than your comfort setting",
+      message: "Your crowd sensitivity preference suggests a calmer path is available.",
+    };
+  }
+  if (alert.value) return alert.value;
+  return null;
+});
+
+function clearRouteView() {
+  loading.value = false;
+  activeRoute.value = null;
+  quietSpaces.value = [];
+  alert.value = null;
+  forecast.value = null;
+  clearRefugeMarkers();
+  setRouteLine([]);
+  startMarker?.remove();
+  startMarker = null;
+}
+
+async function loadMap() {
+  let routeId = route.query.route;
+  alertDismissed.value = false;
+
+  // Arrived from a refuge card — no route id yet, but we do have a
+  // destination and its coordinates, so generate the route on the fly
+  // instead of sending the user back through the Routes picker.
+  const destLat = Number(route.query.destLat);
+  const destLng = Number(route.query.destLng);
+  if (!routeId && route.query.destination && Number.isFinite(destLat) && Number.isFinite(destLng)) {
+    loading.value = true;
+    try {
+      const origin = await getAccurateCurrentLocation();
+      const options = await getRouteOptions(route.query.destination, { lat: destLat, lng: destLng }, origin);
+      const recommended = options.find((option) => option.recommended) ?? options[0];
+      if (recommended) routeId = recommended.id;
+    } catch (err) {
+      console.warn("On-the-fly route generation failed:", err);
+    }
+  }
+
+  // No route to show (bare /map, or generation above failed) — show the
+  // plain map rather than a route summary for a route the user never chose.
+  if (!routeId) {
+    clearRouteView();
+    return;
+  }
+
+  loading.value = true;
+  const [routeDetail, spaces, sensoryAlert, sensoryForecast] = await Promise.all([
+    getRouteDetail(routeId),
+    getQuietSpaces(routeId),
+    getSensoryAlert(routeId),
+    getForecast(routeId),
+  ]);
+  activeRoute.value = routeDetail;
+  quietSpaces.value = spaces;
+  alert.value = sensoryAlert;
+  forecast.value = sensoryForecast;
+  loading.value = false;
+  renderMapLayer();
+}
+
+async function loadPedestrianCounts() {
+  pedestrianCounts.value = await getPedestrianCounts();
+  renderSensorMarkers();
+}
+
+onMounted(() => {
+  // The route summary panel is pure data (backend calls) and doesn't need
+  // the map to be ready — don't make it wait on Mapbox's tile/style load,
+  // which is the slower of the two. Once the map does finish, re-render
+  // whatever route/sensor data already arrived while it was loading.
+  initMap().then(() => {
+    renderMapLayer();
+    renderSensorMarkers();
+  });
+  loadMap();
+  loadPedestrianCounts();
+  stopLocationWatch = watchCurrentLocation(
+    renderCurrentLocationMarker,
+    (err) => console.warn("Live location update failed:", err)
+  );
+});
+watch(() => route.query.route, loadMap);
+watch(showRefuges, renderMapLayer);
 
 onBeforeUnmount(() => {
+  clearRefugeMarkers();
+  clearSensorMarkers();
+  startMarker?.remove();
+  currentLocationMarker?.remove();
   stopLocationWatch?.();
+  map?.remove();
 });
 
-watch(() => route.query.route, loadMap);
-
 function reroute() {
-  alertDismissed.value = true;
+  if (activeRoute.value?.alternativeId) {
+    router.push({ path: "/map", query: { route: activeRoute.value.alternativeId } });
+  } else {
+    alertDismissed.value = true;
+  }
 }
 </script>
 
 <template>
   <PageShell>
-    <transition name="fade">
-      <div v-if="alert && !alertDismissed" class="alert-banner">
-        <div class="alert-text">
-          <Icon class="alert-icon" name="alert" :size="18" />
+    <div class="map-shell">
+      <div class="map-overlays">
+        <transition name="fade">
+          <div v-if="activeBanner" class="alert-banner">
+            <div class="alert-text">
+              <Icon class="alert-icon" name="alert" :size="18" />
+
+              <div>
+                <strong>{{ activeBanner.title }}</strong>
+                <p>{{ activeBanner.message }}</p>
+              </div>
+            </div>
+
+            <button class="reroute-button" @click="reroute">
+              <Icon name="refresh" :size="13" />
+              {{ activeRoute?.alternativeId ? "Take calmer route" : "Dismiss" }}
+            </button>
+          </div>
+        </transition>
+
+        <div v-if="forecast" class="forecast-banner">
+          <Icon class="forecast-icon" name="trendingUp" :size="18" />
 
           <div>
-            <strong>{{ alert.title }}</strong>
-            <p>{{ alert.message }}</p>
+            <strong>{{ forecast.levelLabel }} expected in the next hour</strong>
+            <p>{{ forecast.basis }}</p>
+            <p class="forecast-disclaimer">Estimate based on available pedestrian data — actual conditions may vary.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="map-area">
+        <div ref="mapEl" class="map-canvas"></div>
+
+        <div v-if="loading || !mapReady" class="map-loading">
+          <span class="map-loading-dot"></span>
+          Finding your calm route…
+        </div>
+
+        <div v-if="mapError" class="map-error">
+          Couldn't load the map. Check your connection and try again.
+        </div>
+      </div>
+
+      <section v-if="loading" class="route-summary skeleton-summary">
+        <div class="summary-top">
+          <SkeletonBlock width="130px" height="17px" />
+          <SkeletonBlock width="80px" height="20px" radius="999px" />
+        </div>
+        <SkeletonBlock width="100%" height="6px" radius="999px" />
+        <div class="skeleton-stat-grid">
+          <SkeletonBlock v-for="n in 4" :key="n" width="100%" height="34px" />
+        </div>
+      </section>
+
+      <section v-else-if="activeRoute" class="route-summary">
+        <div class="summary-top">
+          <h2>{{ activeRoute.name }}</h2>
+
+          <span class="sensory-badge" :class="`level-${activeRoute.level}`">
+            {{ activeRoute.levelLabel }}
+          </span>
+        </div>
+
+        <div class="progress-row">
+          <ProgressBar :value="activeRoute.progress" />
+          <span class="progress-label">
+            <Icon name="check" :size="13" />
+            {{ activeRoute.progress }}% of the way there
+          </span>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat">
+            <span class="stat-label">Duration</span>
+            <strong class="stat-value">{{ activeRoute.duration }}</strong>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Distance</span>
+            <strong class="stat-value">{{ activeRoute.distance }}</strong>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Quiet spaces</span>
+            <strong class="stat-value">{{ quietSpaces.length }}</strong>
           </div>
         </div>
 
-        <button class="reroute-button" @click="reroute">
-          <Icon name="refresh" :size="13" />
-          Reroute
-        </button>
-      </div>
-    </transition>
+        <div v-if="activeRoute.transit" class="transit-row">
+          <Icon name="train" :size="15" />
+          <span>{{ activeRoute.transit.walk }} walk to {{ activeRoute.transit.stop }}</span>
+        </div>
 
-    <div class="map-area">
-      <div v-if="loading" class="map-loading">
-        <span class="map-loading-dot"></span>
-        Finding your calm route…
-      </div>
-
-      <RouteMap
-        v-else-if="activeRoute"
-        :polyline="activeRoute.polyline"
-        :quiet-spaces="quietSpaces"
-        :pedestrian-sensors="activeRoute.nearbySensors || []"
-        :current-location="currentLocation"
-      />
-
-      <div v-else class="map-loading">
-        {{ errorMessage || "Unable to load route." }}
-      </div>
+        <div v-if="activeRoute.factors?.length" class="factor-chips">
+          <span v-for="factor in activeRoute.factors" :key="factor.label" class="factor-chip">
+            <Icon :name="factor.icon" :size="13" />
+            {{ factor.label }}
+          </span>
+        </div>
+      </section>
     </div>
-
-    <section v-if="loading" class="route-summary skeleton-summary">
-      <div class="summary-top">
-        <SkeletonBlock width="130px" height="17px" />
-        <SkeletonBlock width="80px" height="20px" radius="999px" />
-      </div>
-      <SkeletonBlock width="100%" height="6px" radius="999px" />
-      <div class="skeleton-stat-grid">
-        <SkeletonBlock v-for="n in 4" :key="n" width="100%" height="34px" />
-      </div>
-    </section>
-
-    <section v-else-if="activeRoute" class="route-summary">
-      <div class="summary-top">
-        <h2>{{ activeRoute.name }}</h2>
-
-        <span class="sensory-badge" :class="`level-${activeRoute.level}`">
-          {{ activeRoute.levelLabel }}
-        </span>
-      </div>
-
-      <div class="progress-row">
-        <ProgressBar :value="activeRoute.progress" />
-        <span class="progress-label">
-          <Icon name="check" :size="13" />
-          {{ activeRoute.progress }}% of the way there
-        </span>
-      </div>
-
-      <div class="stat-grid">
-        <div class="stat">
-          <span class="stat-label">Duration</span>
-          <strong class="stat-value">{{ activeRoute.duration }}</strong>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Distance</span>
-          <strong class="stat-value">{{ activeRoute.distance }}</strong>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Quiet spaces</span>
-          <strong class="stat-value">{{ quietSpaces.length }}</strong>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Nearby sensors</span>
-          <strong class="stat-value">
-            {{ activeRoute.matchedSensorCount ?? 0 }}
-          </strong>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Location accuracy</span>
-          <strong class="stat-value">
-            {{
-              currentLocation
-                ? `±${Math.round(currentLocation.accuracy)} m`
-                : "Waiting…"
-            }}
-          </strong>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Wayfinding</span>
-          <strong class="stat-value stat-value-tag">
-            <Icon name="sun" :size="13" />
-            Sunflower
-          </strong>
-        </div>
-      </div>
-    </section>
   </PageShell>
 </template>
 
@@ -308,6 +495,90 @@ function reroute() {
   opacity: 0;
 }
 
+.forecast-banner {
+  display: flex;
+  align-items: flex-start;
+
+  gap: 11px;
+  padding: 15px 16px;
+
+  margin-top: 12px;
+
+  background: var(--color-primary-soft);
+  border: 1px solid #d3e3da;
+  border-radius: var(--radius-md);
+}
+
+.forecast-icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+
+  color: var(--color-primary-dark);
+}
+
+.forecast-banner strong {
+  display: block;
+
+  color: var(--color-primary-dark);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.forecast-banner p {
+  margin: 3px 0 0;
+
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.forecast-disclaimer {
+  color: var(--color-text-faint);
+  font-size: 10.5px;
+  font-style: italic;
+}
+
+.transit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  margin-top: 16px;
+  padding-top: 16px;
+
+  border-top: 1px solid var(--color-border);
+
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.transit-row :deep(.sl-icon) {
+  color: var(--color-primary);
+}
+
+.factor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  margin-top: 12px;
+}
+
+.factor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 6px 11px;
+
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-pill);
+
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
 .map-area {
   position: relative;
   overflow: hidden;
@@ -321,9 +592,27 @@ function reroute() {
   border-radius: var(--radius-lg);
 }
 
+.map-canvas {
+  position: absolute;
+  inset: 0;
+}
 
+.map-error {
+  position: absolute;
+  inset: 0;
 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
 
+  background: var(--color-surface-muted);
+
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
 
 .map-loading {
   position: absolute;
@@ -365,48 +654,6 @@ function reroute() {
   50% {
     opacity: 1;
   }
-}
-
-.map-marker {
-  position: absolute;
-  transform: translate(-50%, -50%);
-}
-
-
-
-.map-marker.refuge {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-
-  gap: 3px;
-}
-
-.pin {
-  display: grid;
-  place-items: center;
-
-  width: 28px;
-  height: 28px;
-
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 50%;
-  box-shadow: var(--shadow-sm);
-
-  color: var(--color-primary);
-}
-
-.pin-label {
-  padding: 3px 7px;
-
-  background: var(--color-surface);
-  border-radius: 6px;
-
-  color: var(--color-text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  white-space: nowrap;
 }
 
 .route-summary {
@@ -515,15 +762,6 @@ function reroute() {
   font-weight: 700;
 }
 
-.stat-value-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-
-  color: var(--color-primary);
-  font-size: 13px;
-}
-
 .skeleton-stat-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -541,8 +779,61 @@ function reroute() {
 }
 
 @media (min-width: 1024px) {
+  /* Desktop: the map fills the whole shell edge-to-edge and everything
+     else — alerts, forecast, route summary — floats on top of it as
+     docked panels, instead of stacking in a column below a small map. */
+  .map-shell {
+    position: relative;
+
+    /* .page-content's own padding-top (44px) isn't enough clearance on its
+       own — the top nav is an absolutely-positioned 78px-tall box anchored
+       to .app-container's top edge, so it overlaps anything starting much
+       closer than that to the top. */
+    margin-top: 44px;
+    height: clamp(520px, calc(100vh - 250px), 820px);
+  }
+
+  .map-area {
+    position: absolute;
+    inset: 0;
+
+    height: 100%;
+    margin-top: 0;
+  }
+
+  .map-overlays {
+    position: absolute;
+    z-index: 2;
+    top: 20px;
+    left: 20px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    width: 400px;
+    max-width: calc(100% - 380px);
+  }
+
+  .alert-banner,
+  .forecast-banner {
+    margin-top: 0;
+    box-shadow: var(--shadow-md);
+  }
+
   .route-summary {
-    max-width: 480px;
+    position: absolute;
+    z-index: 2;
+    top: 20px;
+    right: 20px;
+    bottom: 20px;
+
+    overflow-y: auto;
+    width: 340px;
+    max-width: calc(100% - 420px);
+    margin-top: 0;
+
+    box-shadow: var(--shadow-md);
   }
 }
 </style>

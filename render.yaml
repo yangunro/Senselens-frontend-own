@@ -1,0 +1,20 @@
+services:
+  - type: web
+    runtime: static
+    name: senselens-frontend
+    rootDir: senselens-frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      # Backend API base URL (FastAPI Cloud). No trailing slash.
+      - key: VITE_API_BASE
+        sync: false
+      # Mapbox access token, from account.mapbox.com/access-tokens/.
+      - key: VITE_MAPBOX_ACCESS_TOKEN
+        sync: false
+    routes:
+      # SPA history-mode routing: unmatched paths (e.g. /map, /refuges)
+      # must fall through to index.html, not 404.
+      - type: rewrite
+        source: /*
+        destination: /index.html

@@ -22,6 +22,12 @@ const paths = {
   user: '<circle cx="12" cy="8.5" r="3.5"/><path d="M4.5 20c1-4 4-6 7.5-6s6.5 2 7.5 6"/>',
   refresh: '<path d="M4 12a8 8 0 0 1 13.5-5.8"/><path d="M17 4v3.5h-3.5"/><path d="M20 12a8 8 0 0 1-13.5 5.8"/><path d="M7 20v-3.5h3.5"/>',
   tent: '<path d="M12 4 4 20h16L12 4Z"/><line x1="9" y1="20" x2="12" y2="12"/><line x1="15" y1="20" x2="12" y2="12"/>',
+  users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9.5" r="2.3"/><path d="M15.3 14.2c2.6.5 4.7 2.7 4.7 5.8"/>',
+  tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2-2 2.6-2.6Z"/>',
+  megaphone: '<path d="M3 10v4a1 1 0 0 0 1 1h2l7 4V5L6 9H4a1 1 0 0 0-1 1Z"/><path d="M16.5 9a4 4 0 0 1 0 6"/><path d="M19 6.5a8 8 0 0 1 0 11"/>',
+  train: '<rect x="5" y="4" width="14" height="12" rx="3"/><line x1="5" y1="11" x2="19" y2="11"/><circle cx="9" cy="19" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="19" r="1" fill="currentColor" stroke="none"/>',
+  trendingUp: '<path d="M3 17 9 11 13 15 21 6"/><path d="M15 6h6v6"/>',
+  coffee: '<path d="M5 9h11v6a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V9Z"/><path d="M16 10.5h1.5a2.5 2.5 0 0 1 0 5H16"/><line x1="8" y1="4" x2="8" y2="6.5"/><line x1="11" y1="4" x2="11" y2="6.5"/>',
 };
 </script>
 

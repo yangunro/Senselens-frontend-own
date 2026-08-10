@@ -104,7 +104,8 @@ Supabase PostgreSQL
 
 - Vue
 - JavaScript
-- Google Maps integration being developed by the frontend/integration team
+- Mapbox for maps and address search
+- Google Routes API (server-side, called by the backend) for walking route generation
 
 ### Cloud Infrastructure
 
@@ -851,11 +852,21 @@ https://senselens.onrender.com
 
 ## Frontend
 
-The Vue frontend is currently hosted on Render:
+The Vue frontend deploys from this repository's `senselens-frontend/` directory
+on `main` — consolidated here from the `wenlu` branch (2026-08-10), which was
+the actively-maintained implementation. A `render.yaml` at the repo root
+declares the Render static site config (build command, publish path, SPA
+routing rewrite, required env vars) so the deploy is reproducible by anyone
+on the team, not tied to one person's account or a personal fork.
+
+Required environment variables (set as secrets in Render, not committed):
 
 ```text
-https://senselens.onrender.com
+VITE_API_BASE               # FastAPI Cloud backend URL, no trailing slash
+VITE_MAPBOX_ACCESS_TOKEN    # from account.mapbox.com/access-tokens/
 ```
+
+The frontend uses Mapbox (not Google Maps) for maps and address search.
 
 ## Backend
 
