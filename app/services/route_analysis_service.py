@@ -347,11 +347,22 @@ def analyse_route(
         sensors,
         radius_metres,
     )
-    nearby_construction = construction_sites_near_route(
-        route_points,
-        construction_sites or [],
-    )
-    lighting = lighting_summary(route_points, light_candidates or [])
+    # Both are enhancements on top of the core crowd score — a bad geometry
+    # edge case in either one shouldn't take the whole route down with it.
+    try:
+        nearby_construction = construction_sites_near_route(
+            route_points,
+            construction_sites or [],
+        )
+    except Exception as error:
+        print(f"Construction matching failed, continuing without it: {error}")
+        nearby_construction = []
+
+    try:
+        lighting = lighting_summary(route_points, light_candidates or [])
+    except Exception as error:
+        print(f"Lighting matching failed, continuing without it: {error}")
+        lighting = {"averageLux": None, "matchedLightCount": 0, "comfortLabel": None}
     route_average = _weighted_average_count(nearby_sensors)
     score = _percentile_score(
         route_average,

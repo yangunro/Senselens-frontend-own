@@ -69,22 +69,35 @@ def get_routes(
             destination_waypoint,
         )
         pedestrian_snapshot = get_latest_pedestrian_snapshot()
-        construction_sites = get_active_construction_sites()
+
+        # Construction/lighting are enhancements on top of route generation,
+        # not the core feature — if either lookup fails for any reason (DB
+        # hiccup, bad data), the route itself should still come back rather
+        # than the whole request failing over an optional extra.
+        try:
+            construction_sites = get_active_construction_sites()
+        except Exception as error:
+            print(f"Construction site lookup failed, continuing without it: {error}")
+            construction_sites = []
 
         # One lighting fetch covering every alternative, not one per route —
         # they all run through roughly the same area, and a DB round trip
         # per alternative would noticeably slow down route generation.
-        all_points = [decode_route(route.get("polyline")) for route in routes]
         light_candidates = []
-        boxes = [route_bounding_box(points) for points in all_points if points]
-        if boxes:
-            min_lat = min(box[0] for box in boxes)
-            max_lat = max(box[1] for box in boxes)
-            min_lng = min(box[2] for box in boxes)
-            max_lng = max(box[3] for box in boxes)
-            light_candidates = get_lights_in_bounds(
-                min_lat, max_lat, min_lng, max_lng
-            )
+        try:
+            all_points = [decode_route(route.get("polyline")) for route in routes]
+            boxes = [route_bounding_box(points) for points in all_points if points]
+            if boxes:
+                min_lat = min(box[0] for box in boxes)
+                max_lat = max(box[1] for box in boxes)
+                min_lng = min(box[2] for box in boxes)
+                max_lng = max(box[3] for box in boxes)
+                light_candidates = get_lights_in_bounds(
+                    min_lat, max_lat, min_lng, max_lng
+                )
+        except Exception as error:
+            print(f"Lighting lookup failed, continuing without it: {error}")
+            light_candidates = []
 
         routes = [
             analyse_route(
