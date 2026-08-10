@@ -133,6 +133,7 @@ def get_routes(
                 "name": route["name"],
                 "description": route["description"],
                 "duration": route["duration"],
+                "durationMinutes": route["durationMinutes"],
                 "footnote": route["footnote"],
                 "recommended": route["recommended"],
                 "sensoryScore": route["sensoryScore"],
