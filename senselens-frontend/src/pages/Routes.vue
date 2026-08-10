@@ -8,9 +8,12 @@ import { FALLBACK_ORIGIN, getRouteOptions } from "../services/routes";
 import { getAccurateCurrentLocation } from "../services/geolocation";
 import { geocodeAddress } from "../services/geocode";
 import { API_BASE } from "../services/http";
+import { usePreferences, toggleValue } from "../composables/usePreferences";
 
 const route = useRoute();
 const router = useRouter();
+const preferences = usePreferences();
+const avoidConstruction = computed(() => toggleValue(preferences, "construction", false));
 
 const destination = computed(() => route.query.destination || "Collins Street");
 // Only present when the user picked a real place from Home's autocomplete —
@@ -137,7 +140,9 @@ async function loadRoutes() {
   }
 
   try {
-    routeOptions.value = await getRouteOptions(destination.value, effectiveDestinationPoint, origin);
+    routeOptions.value = await getRouteOptions(destination.value, effectiveDestinationPoint, origin, {
+      avoidConstruction: avoidConstruction.value,
+    });
   } catch (err) {
     if (sequence !== loadSequence) return;
     console.warn("Route generation failed:", err);
@@ -157,7 +162,16 @@ onMounted(loadRoutes);
 // already cached by the time they tap "Start calm route" instead of making
 // them wait for it on the next page.
 import("../pages/Map.vue");
-watch(() => [destination.value, destinationPoint.value, customOriginLabel.value, customOriginPoint.value], loadRoutes);
+watch(
+  () => [
+    destination.value,
+    destinationPoint.value,
+    customOriginLabel.value,
+    customOriginPoint.value,
+    avoidConstruction.value,
+  ],
+  loadRoutes
+);
 
 function startCalmRoute() {
   router.push({ path: "/map", query: { route: selectedId.value } });

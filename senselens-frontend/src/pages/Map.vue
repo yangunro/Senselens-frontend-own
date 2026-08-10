@@ -19,6 +19,7 @@ import { FALLBACK_ORIGIN, getRouteOptions } from "../services/routes";
 import { watchCurrentLocation, getAccurateCurrentLocation } from "../services/geolocation";
 import { openExternalNavigation } from "../services/externalNavigation";
 import { estimateRouteProgress } from "../services/routeProgress";
+import { saveRoute } from "../services/savedRoutes";
 import { usePreferences, toggleValue } from "../composables/usePreferences";
 
 const route = useRoute();
@@ -330,6 +331,7 @@ function renderMapLayer() {
 
 // "Always show refuge spaces" preference — when off, quiet-space markers stay off the map.
 const showRefuges = computed(() => toggleValue(preferences, "refuges", true));
+const avoidConstruction = computed(() => toggleValue(preferences, "construction", false));
 
 // How much crowding the user can tolerate before a route counts as "too busy" —
 // derived from their crowd-sensitivity preference (0 low sensitivity/high tolerance
@@ -344,6 +346,10 @@ const crowdExceeded = computed(
   () => !!activeRoute.value && levelRank[activeRoute.value.level] > crowdTolerance.value
 );
 
+const constructionExceeded = computed(
+  () => !!activeRoute.value?.hasActiveConstruction && avoidConstruction.value
+);
+
 // Prioritise a personalised "this route is busier than you like" banner over the
 // generic conditions alert — both drive users toward the calmer alternativeId route.
 const activeBanner = computed(() => {
@@ -352,6 +358,12 @@ const activeBanner = computed(() => {
     return {
       title: "This route is busier than your comfort setting",
       message: "Your crowd sensitivity preference suggests a calmer path is available.",
+    };
+  }
+  if (constructionExceeded.value) {
+    return {
+      title: "This route passes active construction",
+      message: "Your avoid-construction-zones preference suggests a clearer path is available.",
     };
   }
   if (alert.value) return alert.value;
@@ -365,6 +377,8 @@ function clearRouteView() {
   quietSpaces.value = [];
   alert.value = null;
   forecast.value = null;
+  showSaveForm.value = false;
+  saved.value = false;
   clearRefugeMarkers();
   setRouteLine([]);
   startMarker?.remove();
@@ -393,7 +407,9 @@ async function loadMap() {
       origin = FALLBACK_ORIGIN;
     }
     try {
-      const options = await getRouteOptions(route.query.destination, { lat: destLat, lng: destLng }, origin);
+      const options = await getRouteOptions(route.query.destination, { lat: destLat, lng: destLng }, origin, {
+        avoidConstruction: avoidConstruction.value,
+      });
       const recommended = options.find((option) => option.recommended) ?? options[0];
       if (recommended) routeId = recommended.id;
     } catch (err) {
@@ -420,6 +436,8 @@ async function loadMap() {
   quietSpaces.value = spaces;
   alert.value = sensoryAlert;
   forecast.value = sensoryForecast;
+  showSaveForm.value = false;
+  saved.value = false;
   loading.value = false;
   renderMapLayer();
 
@@ -488,6 +506,44 @@ function reroute() {
     router.push({ path: "/map", query: { route: activeRoute.value.alternativeId } });
   } else {
     alertDismissed.value = true;
+  }
+}
+
+const showSaveForm = ref(false);
+const saveLabel = ref("");
+const saving = ref(false);
+const saved = ref(false);
+const saveError = ref("");
+
+function openSaveForm() {
+  // Best-effort default — the place name is only known when we arrived via
+  // search or a refuge card; picking a route straight off the Routes list
+  // has no name to fall back on, so an empty field beats a wrong guess.
+  saveLabel.value = route.query.destination || "";
+  saveError.value = "";
+  showSaveForm.value = true;
+}
+
+async function confirmSave() {
+  if (!activeRoute.value) return;
+  saving.value = true;
+  saveError.value = "";
+  try {
+    await saveRoute({
+      label: saveLabel.value.trim() || "Saved route",
+      origin: activeRoute.value.origin,
+      destination: activeRoute.value.destination,
+      level: activeRoute.value.level,
+      distanceM: activeRoute.value.distanceMeters,
+      durationMin: activeRoute.value.durationMinutes,
+    });
+    saved.value = true;
+    showSaveForm.value = false;
+  } catch (err) {
+    console.warn("Saving route failed:", err);
+    saveError.value = "Couldn't save this route. Try again.";
+  } finally {
+    saving.value = false;
   }
 }
 </script>
@@ -634,6 +690,31 @@ function reroute() {
         >
           <Icon name="navigation" :size="15" />
           Navigate with my maps app
+        </button>
+
+        <div v-if="showSaveForm" class="save-form">
+          <input
+            v-model="saveLabel"
+            type="text"
+            placeholder="Name this route (e.g. Home to work)"
+            maxlength="80"
+            @keyup.enter="confirmSave"
+          />
+          <div class="save-form-actions">
+            <button type="button" class="save-form-cancel" @click="showSaveForm = false">Cancel</button>
+            <button type="button" class="save-form-confirm" :disabled="saving" @click="confirmSave">
+              {{ saving ? "Saving…" : "Save" }}
+            </button>
+          </div>
+          <p v-if="saveError" class="save-error">{{ saveError }}</p>
+        </div>
+        <button v-else-if="saved" type="button" class="save-button saved" disabled>
+          <Icon name="check" :size="15" />
+          Saved
+        </button>
+        <button v-else type="button" class="save-button" @click="openSaveForm">
+          <Icon name="bookmark" :size="15" />
+          Save route
         </button>
       </section>
     </div>
@@ -875,6 +956,97 @@ function reroute() {
 
 .navigate-button:hover {
   background: var(--color-primary-dark);
+}
+
+.save-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  width: 100%;
+  margin-top: 10px;
+  padding: 13px 16px;
+
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+
+  color: var(--color-primary-dark);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.save-button:hover {
+  background: var(--color-surface-muted);
+}
+
+.save-button.saved {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.save-form {
+  margin-top: 10px;
+  padding: 13px;
+
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-md);
+}
+
+.save-form input {
+  width: 100%;
+  padding: 10px 12px;
+
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+
+  font-size: 13px;
+}
+
+.save-form-actions {
+  display: flex;
+  gap: 8px;
+
+  margin-top: 9px;
+}
+
+.save-form-cancel,
+.save-form-confirm {
+  flex: 1 1 auto;
+
+  padding: 10px 12px;
+
+  border-radius: var(--radius-sm);
+
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.save-form-cancel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+
+  color: var(--color-text-muted);
+}
+
+.save-form-confirm {
+  background: var(--color-primary);
+  border: none;
+
+  color: white;
+}
+
+.save-form-confirm:disabled {
+  background: var(--color-text-faint);
+}
+
+.save-error {
+  margin: 8px 0 0;
+
+  color: var(--color-high);
+  font-size: 12px;
 }
 
 .map-area {

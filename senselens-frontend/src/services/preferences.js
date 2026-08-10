@@ -4,6 +4,12 @@ const defaultPreferences = {
   sliders: [{ key: "crowd", label: "Crowd sensitivity", value: 0 }],
   toggles: [
     {
+      key: "construction",
+      label: "Avoid construction zones",
+      note: "Prefer routes away from active development sites.",
+      value: false,
+    },
+    {
       key: "refuges",
       label: "Always show refuge spaces",
       note: "Keep parks, quiet libraries and cafes highlighted on-screen.",

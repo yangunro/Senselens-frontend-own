@@ -10,11 +10,14 @@ from app.services.forecast_service import build_pedestrian_forecast
 from app.services.pedestrian_service import (
     get_latest_pedestrian_snapshot,
 )
+from app.services.construction_service import get_active_construction_sites
+from app.services.lighting_service import get_lights_in_bounds
 from app.services.refuges_service import get_refuges
 from app.services.route_analysis_service import (
     analyse_route,
     decode_route,
     refuges_near_route,
+    route_bounding_box,
 )
 
 
@@ -30,6 +33,7 @@ def get_routes(
     origin_lng=None,
     destination_lat=None,
     destination_lng=None,
+    avoid_construction=False,
 ):
     """
     Generate live Google walking routes when a destination is supplied.
@@ -65,12 +69,39 @@ def get_routes(
             destination_waypoint,
         )
         pedestrian_snapshot = get_latest_pedestrian_snapshot()
+        construction_sites = get_active_construction_sites()
+
+        # One lighting fetch covering every alternative, not one per route —
+        # they all run through roughly the same area, and a DB round trip
+        # per alternative would noticeably slow down route generation.
+        all_points = [decode_route(route.get("polyline")) for route in routes]
+        light_candidates = []
+        boxes = [route_bounding_box(points) for points in all_points if points]
+        if boxes:
+            min_lat = min(box[0] for box in boxes)
+            max_lat = max(box[1] for box in boxes)
+            min_lng = min(box[2] for box in boxes)
+            max_lng = max(box[3] for box in boxes)
+            light_candidates = get_lights_in_bounds(
+                min_lat, max_lat, min_lng, max_lng
+            )
+
         routes = [
-            analyse_route(route, pedestrian_snapshot)
+            analyse_route(
+                route,
+                pedestrian_snapshot,
+                construction_sites=construction_sites,
+                light_candidates=light_candidates,
+            )
             for route in routes
         ]
         routes.sort(
             key=lambda route: (
+                # Only takes priority over crowd/duration when the user has
+                # opted in via their "avoid construction zones" preference —
+                # otherwise a route isn't penalised for something the rider
+                # never asked to avoid.
+                avoid_construction and route["hasActiveConstruction"],
                 route["sensoryScore"] is None,
                 (
                     route["sensoryScore"]
@@ -139,6 +170,10 @@ def get_routes(
                 "sensoryScore": route["sensoryScore"],
                 "matchedSensorCount": route["matchedSensorCount"],
                 "pedestrianObservedAt": route["pedestrianObservedAt"],
+                "hasActiveConstruction": route["hasActiveConstruction"],
+                "constructionSitesNearby": route["constructionSitesNearby"],
+                "averageLux": route["averageLux"],
+                "lightingComfort": route["lightingComfort"],
                 "factors": route["factors"],
                 "transit": route["transit"],
             }
@@ -192,7 +227,9 @@ def get_route(route_id):
             "level": dynamic_route["level"],
             "levelLabel": dynamic_route["levelLabel"],
             "duration": dynamic_route["duration"],
+            "durationMinutes": dynamic_route["durationMinutes"],
             "distance": dynamic_route["distance"],
+            "distanceMeters": dynamic_route["distanceMeters"],
             "progress": dynamic_route["progress"],
             "factors": dynamic_route["factors"],
             "transit": dynamic_route["transit"],
@@ -207,6 +244,10 @@ def get_route(route_id):
             "pedestrianObservedAt": dynamic_route["pedestrianObservedAt"],
             "sensorRadiusM": dynamic_route["sensorRadiusM"],
             "nearbySensors": dynamic_route["nearbySensors"],
+            "hasActiveConstruction": dynamic_route["hasActiveConstruction"],
+            "constructionSitesNearby": dynamic_route["constructionSitesNearby"],
+            "averageLux": dynamic_route["averageLux"],
+            "lightingComfort": dynamic_route["lightingComfort"],
         }
 
     query = text("""

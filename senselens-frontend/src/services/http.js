@@ -27,6 +27,12 @@ export async function apiPost(path, body) {
   return res.json();
 }
 
+export async function apiDelete(path) {
+  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
+  return res.json();
+}
+
 // Tries the real backend first (only if VITE_API_BASE is configured), falling
 // back to mock data if it's unset or the request fails — so the app keeps
 // working with mocks during local dev / while the backend is still unstable,

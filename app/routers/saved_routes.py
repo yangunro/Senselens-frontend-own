@@ -13,9 +13,18 @@ from app.services.saved_routes_service import (
 router = APIRouter()
 
 
+class RoutePoint(BaseModel):
+    lat: float
+    lng: float
+
+
 class SaveRouteRequest(BaseModel):
-    routeId: UUID
     label: str
+    origin: RoutePoint
+    destination: RoutePoint
+    level: str = "unknown"
+    distanceM: int
+    durationMin: int
 
 
 @router.get("/saved-routes")
@@ -27,22 +36,21 @@ def saved_routes():
 def create_saved_route(payload: SaveRouteRequest):
     try:
         saved_route = save_route(
-            route_id=payload.routeId,
             label=payload.label,
+            origin={"lat": payload.origin.lat, "lng": payload.origin.lng},
+            destination={
+                "lat": payload.destination.lat,
+                "lng": payload.destination.lng,
+            },
+            level=payload.level,
+            distance_m=payload.distanceM,
+            duration_min=payload.durationMin,
         )
 
     except Exception as error:
-        error_message = str(error)
-
-        if "foreign key" in error_message.lower():
-            raise HTTPException(
-                status_code=404,
-                detail="Route not found",
-            )
-
         raise HTTPException(
             status_code=500,
-            detail="Unable to save route",
+            detail=f"Unable to save route: {str(error)}",
         )
 
     if saved_route is None:

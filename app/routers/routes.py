@@ -72,6 +72,10 @@ def routes(
         ge=-180,
         le=180,
     ),
+    avoid_construction: bool = Query(
+        default=False,
+        alias="avoidConstruction",
+    ),
 ):
     if destination and (
         origin_lat is None
@@ -105,6 +109,7 @@ def routes(
             origin_lng,
             destination_lat,
             destination_lng,
+            avoid_construction,
         )
     except GoogleRoutesConfigurationError as error:
         raise HTTPException(
