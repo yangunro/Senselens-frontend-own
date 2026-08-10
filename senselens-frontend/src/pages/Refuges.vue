@@ -228,6 +228,7 @@ import("../pages/Map.vue");
 .refuge-card {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -256,7 +257,13 @@ import("../pages/Map.vue");
 
   padding: 11px 16px;
 
+  /* Buttons have no background by default in most browsers' UA stylesheet —
+     without setting one explicitly, this rendered as a mismatched grey strip
+     instead of matching the card around it. */
+  background: var(--color-surface);
+  border: none;
   border-top: 1px solid var(--color-border);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
 
   color: var(--color-primary);
   font-size: 12.5px;
