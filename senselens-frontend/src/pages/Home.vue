@@ -1,8 +1,6 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from "vue";
+import { ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
-import { importLibrary } from "@googlemaps/js-api-loader";
-import { ensureGoogleMapsConfigured } from "../services/googleMapsLoader";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
@@ -12,13 +10,20 @@ const MELBOURNE_CBD = { lat: -37.8136, lng: 144.9631 };
 
 const router = useRouter();
 const destination = ref("");
-const autocompleteHost = ref(null);
-const autocompleteReady = ref(false);
-// Set only when the user actually picks a real place from the autocomplete
+// Set only when the user actually picks a real place from the suggestion
 // dropdown — free-typed text with no selection has no coordinates, so route
-// generation falls back to the old text-search behaviour for that case.
+// generation falls back to geocoding the typed text instead (see Routes.vue).
 const destinationPoint = ref(null);
-let autocompleteElement = null;
+const suggestions = ref([]);
+const showSuggestions = ref(false);
+// Mapbox bills/rate-limits by search session — one token per suggest→retrieve
+// cycle, then a fresh one for the next search.
+let sessionToken = crypto.randomUUID();
+let debounceTimer = null;
+// Tracks the in-flight coordinate lookup after picking a suggestion — tapping
+// "Find a calm route" before it resolves must wait for it, not race off with
+// a still-null destinationPoint.
+let pendingRetrieve = null;
 
 const cbdStatus = ref(null);
 const loading = ref(true);
@@ -26,56 +31,72 @@ const loading = ref(true);
 onMounted(async () => {
   cbdStatus.value = await getCbdStatus();
   loading.value = false;
-  setupAutocomplete();
 });
 
-onBeforeUnmount(() => {
-  autocompleteElement?.removeEventListener("input", onAutocompleteInput);
-  autocompleteElement?.removeEventListener("gmp-select", onPlaceSelected);
-  autocompleteElement?.remove();
-});
-
-function onAutocompleteInput(event) {
-  destination.value = event.target?.value ?? autocompleteElement?.value ?? "";
+function onDestinationInput() {
   destinationPoint.value = null;
-}
-
-async function onPlaceSelected(event) {
-  try {
-    const place = event.placePrediction.toPlace();
-    await place.fetchFields({ fields: ["displayName", "formattedAddress", "location"] });
-    if (!place.location) return;
-    destination.value = place.formattedAddress || place.displayName || "";
-    destinationPoint.value = { lat: place.location.lat(), lng: place.location.lng() };
-  } catch (err) {
-    console.warn("Failed to resolve the selected place:", err);
+  showSuggestions.value = true;
+  window.clearTimeout(debounceTimer);
+  const query = destination.value.trim();
+  if (!query) {
+    suggestions.value = [];
+    return;
   }
+  debounceTimer = window.setTimeout(() => fetchSuggestions(query), 250);
 }
 
-async function setupAutocomplete() {
+async function fetchSuggestions(query) {
   try {
-    ensureGoogleMapsConfigured();
-    // The legacy `Autocomplete` class needs the old Places API enabled —
-    // PlaceAutocompleteElement is the newer web-component version, backed
-    // by Places API (New), which is what's actually turned on for this key.
-    const { PlaceAutocompleteElement } = await importLibrary("places");
-    autocompleteElement = new PlaceAutocompleteElement({
-      includedRegionCodes: ["au"],
-      locationBias: { center: MELBOURNE_CBD, radius: 50000 },
+    const params = new URLSearchParams({
+      q: query,
+      access_token: import.meta.env.VITE_MAPBOX_ACCESS_TOKEN,
+      session_token: sessionToken,
+      proximity: `${MELBOURNE_CBD.lng},${MELBOURNE_CBD.lat}`,
+      country: "au",
+      limit: "5",
     });
-    autocompleteElement.placeholder = "Enter your destination";
-    autocompleteElement.addEventListener("input", onAutocompleteInput);
-    autocompleteElement.addEventListener("gmp-select", onPlaceSelected);
-    autocompleteHost.value.appendChild(autocompleteElement);
-    autocompleteReady.value = true;
+    const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/suggest?${params}`);
+    if (!res.ok) throw new Error(`Suggest failed: ${res.status}`);
+    const data = await res.json();
+    suggestions.value = data.suggestions ?? [];
   } catch (err) {
-    // Places Autocomplete is a nice-to-have — if it can't load (API not
-    // enabled, network issue), the plain text input below still works.
-    console.warn("Destination autocomplete unavailable, falling back to plain text search:", err);
+    // Suggestions are a nice-to-have — if the request fails, the plain text
+    // input still works via findCalmRoute's geocoding fallback.
+    console.warn("Destination suggestions unavailable:", err);
+    suggestions.value = [];
   }
 }
 
-function findCalmRoute() {
+function selectSuggestion(suggestion) {
+  showSuggestions.value = false;
+  destination.value = suggestion.place_formatted
+    ? `${suggestion.name}, ${suggestion.place_formatted}`
+    : suggestion.name;
+  suggestions.value = [];
+  pendingRetrieve = (async () => {
+    try {
+      const params = new URLSearchParams({
+        access_token: import.meta.env.VITE_MAPBOX_ACCESS_TOKEN,
+        session_token: sessionToken,
+      });
+      const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/retrieve/${suggestion.mapbox_id}?${params}`);
+      if (!res.ok) throw new Error(`Retrieve failed: ${res.status}`);
+      const data = await res.json();
+      const coordinates = data.features?.[0]?.geometry?.coordinates;
+      if (coordinates) destinationPoint.value = { lat: coordinates[1], lng: coordinates[0] };
+    } catch (err) {
+      console.warn("Failed to resolve the selected place:", err);
+    } finally {
+      sessionToken = crypto.randomUUID();
+    }
+  })();
+}
+
+async function findCalmRoute() {
+  if (pendingRetrieve) {
+    await pendingRetrieve;
+    pendingRetrieve = null;
+  }
   router.push({
     path: "/routes",
     query: {
@@ -138,19 +159,28 @@ function findCalmRoute() {
         </section>
 
         <section class="search-section">
-          <div class="search-box">
-            <Icon class="search-icon" name="search" :size="19" />
+          <div class="search-wrap">
+            <div class="search-box">
+              <Icon class="search-icon" name="search" :size="19" />
 
-            <div v-show="autocompleteReady" ref="autocompleteHost" class="autocomplete-host"></div>
+              <input
+                v-model="destination"
+                type="text"
+                placeholder="Enter your destination"
+                autocomplete="off"
+                @input="onDestinationInput"
+                @keyup.enter="findCalmRoute"
+                @focus="showSuggestions = true"
+                @blur="showSuggestions = false"
+              />
+            </div>
 
-            <input
-              v-if="!autocompleteReady"
-              v-model="destination"
-              type="text"
-              placeholder="Enter your destination"
-              autocomplete="off"
-              @keyup.enter="findCalmRoute"
-            />
+            <ul v-if="showSuggestions && suggestions.length" class="suggestion-list">
+              <li v-for="s in suggestions" :key="s.mapbox_id" @mousedown.prevent="selectSuggestion(s)">
+                <strong>{{ s.name }}</strong>
+                <span v-if="s.place_formatted">{{ s.place_formatted }}</span>
+              </li>
+            </ul>
           </div>
 
           <button class="search-button" @click="findCalmRoute">
@@ -302,6 +332,10 @@ function findCalmRoute() {
   margin-top: 20px;
 }
 
+.search-wrap {
+  position: relative;
+}
+
 .search-box {
   display: flex;
   align-items: center;
@@ -335,23 +369,50 @@ function findCalmRoute() {
   color: var(--color-text-faint);
 }
 
-.autocomplete-host {
-  display: flex;
-  align-items: center;
+.suggestion-list {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
 
-  width: 100%;
+  overflow: hidden;
+
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
 }
 
-.autocomplete-host :deep(gmp-place-autocomplete) {
-  width: 100%;
-  min-height: 56px;
+.suggestion-list li {
+  padding: 11px 16px;
 
-  background: transparent;
-  border: none;
+  cursor: pointer;
+}
+
+.suggestion-list li:not(:last-child) {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.suggestion-list li:hover {
+  background: var(--color-surface-muted);
+}
+
+.suggestion-list strong {
+  display: block;
 
   color: var(--color-text);
-  font-family: inherit;
-  font-size: 14.5px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.suggestion-list span {
+  display: block;
+
+  margin-top: 2px;
+
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 .search-button {
@@ -409,11 +470,6 @@ function findCalmRoute() {
 
   .search-box input {
     height: 60px;
-    font-size: 16px;
-  }
-
-  .autocomplete-host :deep(gmp-place-autocomplete) {
-    min-height: 60px;
     font-size: 16px;
   }
 

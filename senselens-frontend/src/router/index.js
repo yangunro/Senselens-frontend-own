@@ -1,10 +1,4 @@
 import { createRouter, createWebHistory } from "vue-router";
-import Home from "../pages/Home.vue";
-import Routes from "../pages/Routes.vue";
-import Map from "../pages/Map.vue";
-import Refuges from "../pages/Refuges.vue";
-import Setting from "../pages/Setting.vue";
-import NotFound from "../pages/NotFound.vue";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -12,12 +6,45 @@ const router = createRouter({
     return savedPosition || { top: 0 };
   },
   routes: [
-    { path: "/", name: "home", component: Home, meta: { title: "SenseLens — Calm routes through the city" } },
-    { path: "/routes", name: "routes", component: Routes, meta: { title: "Choose a route — SenseLens" } },
-    { path: "/map", name: "map", component: Map, meta: { title: "On the way — SenseLens" } },
-    { path: "/refuges", name: "refuges", component: Refuges, meta: { title: "Sensory refuges — SenseLens" } },
-    { path: "/settings", name: "settings", component: Setting, meta: { title: "Preferences — SenseLens" } },
-    { path: "/:pathMatch(.*)*", name: "not-found", component: NotFound, meta: { title: "Page not found — SenseLens" } },
+    // Lazy-loaded per route so the heavy Mapbox GL bundle (only used by
+    // Map.vue) doesn't get downloaded and parsed before the app is even
+    // interactive on pages that don't need a map.
+    {
+      path: "/",
+      name: "home",
+      component: () => import("../pages/Home.vue"),
+      meta: { title: "SenseLens — Calm routes through the city" },
+    },
+    {
+      path: "/routes",
+      name: "routes",
+      component: () => import("../pages/Routes.vue"),
+      meta: { title: "Choose a route — SenseLens" },
+    },
+    {
+      path: "/map",
+      name: "map",
+      component: () => import("../pages/Map.vue"),
+      meta: { title: "On the way — SenseLens" },
+    },
+    {
+      path: "/refuges",
+      name: "refuges",
+      component: () => import("../pages/Refuges.vue"),
+      meta: { title: "Sensory refuges — SenseLens" },
+    },
+    {
+      path: "/settings",
+      name: "settings",
+      component: () => import("../pages/Setting.vue"),
+      meta: { title: "Preferences — SenseLens" },
+    },
+    {
+      path: "/:pathMatch(.*)*",
+      name: "not-found",
+      component: () => import("../pages/NotFound.vue"),
+      meta: { title: "Page not found — SenseLens" },
+    },
   ],
 });
 

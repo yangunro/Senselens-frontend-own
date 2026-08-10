@@ -1,8 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { importLibrary } from "@googlemaps/js-api-loader";
-import { ensureGoogleMapsConfigured } from "../services/googleMapsLoader";
+import mapboxgl from "../services/mapbox";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
@@ -48,38 +47,55 @@ let map = null;
 let startMarker = null;
 let refugeMarkers = [];
 let sensorMarkers = [];
-let routePolyline = null;
 let currentLocationMarker = null;
 let stopLocationWatch = null;
 
-ensureGoogleMapsConfigured();
+function createCircleElement(size, color, { strokeColor = "#fffdf9", strokeWidth = 3, opacity = 1 } = {}) {
+  const el = document.createElement("div");
+  el.style.width = `${size}px`;
+  el.style.height = `${size}px`;
+  el.style.borderRadius = "50%";
+  el.style.boxSizing = "border-box";
+  el.style.background = color;
+  el.style.opacity = String(opacity);
+  el.style.border = `${strokeWidth}px solid ${strokeColor}`;
+  return el;
+}
 
-async function initMap() {
-  try {
-    const { Map } = await importLibrary("maps");
-    await importLibrary("marker");
-    map = new Map(mapEl.value, {
-      center: MELBOURNE_CBD,
-      zoom: 15,
-      disableDefaultUI: true,
-      zoomControl: true,
-      clickableIcons: false,
-    });
-    mapReady.value = true;
-    renderMapLayer();
-  } catch (err) {
-    console.error("Google Maps failed to load", err);
-    mapError.value = true;
-  }
+function initMap() {
+  return new Promise((resolve) => {
+    try {
+      map = new mapboxgl.Map({
+        container: mapEl.value,
+        style: "mapbox://styles/mapbox/streets-v12",
+        center: [MELBOURNE_CBD.lng, MELBOURNE_CBD.lat],
+        zoom: 15,
+      });
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+      map.once("load", () => {
+        mapReady.value = true;
+        resolve();
+      });
+      map.once("error", (err) => {
+        console.error("Mapbox failed to load", err);
+        mapError.value = true;
+        resolve();
+      });
+    } catch (err) {
+      console.error("Mapbox failed to load", err);
+      mapError.value = true;
+      resolve();
+    }
+  });
 }
 
 function clearRefugeMarkers() {
-  refugeMarkers.forEach((marker) => marker.setMap(null));
+  refugeMarkers.forEach((marker) => marker.remove());
   refugeMarkers = [];
 }
 
 function clearSensorMarkers() {
-  sensorMarkers.forEach((marker) => marker.setMap(null));
+  sensorMarkers.forEach((marker) => marker.remove());
   sensorMarkers = [];
 }
 
@@ -93,20 +109,9 @@ function renderSensorMarkers() {
   sensorMarkers = pedestrianCounts.value.sensors.map((sensor) => {
     const ratio = sensor.minuteCount / max;
     const color = ratio > 0.66 ? "#b8563d" : ratio > 0.33 ? "#a97a1f" : "#2f8f6f";
-    return new google.maps.Marker({
-      position: { lat: sensor.lat, lng: sensor.lng },
-      map,
-      title: `${sensor.name}: ${sensor.minuteCount} pedestrians/min`,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 6 + ratio * 6,
-        fillColor: color,
-        fillOpacity: 0.55,
-        strokeColor: color,
-        strokeWeight: 1,
-      },
-      zIndex: 1,
-    });
+    const el = createCircleElement((6 + ratio * 6) * 2, color, { strokeColor: color, strokeWidth: 1, opacity: 0.3 });
+    el.title = `${sensor.name}: ${sensor.minuteCount} pedestrians/min`;
+    return new mapboxgl.Marker({ element: el }).setLngLat([sensor.lng, sensor.lat]).addTo(map);
   });
 }
 
@@ -114,21 +119,33 @@ function renderSensorMarkers() {
 // reads as "you, right now" rather than "where this route begins".
 function renderCurrentLocationMarker(position) {
   if (!map) return;
-  currentLocationMarker?.setMap(null);
-  currentLocationMarker = new google.maps.Marker({
-    position: { lat: position.lat, lng: position.lng },
-    map,
-    title: `Your location (±${Math.round(position.accuracy)} m)`,
-    zIndex: 3,
-    icon: {
-      path: google.maps.SymbolPath.CIRCLE,
-      scale: 7,
-      fillColor: "#4285f4",
-      fillOpacity: 1,
-      strokeColor: "#fffdf9",
-      strokeWeight: 3,
-    },
-  });
+  currentLocationMarker?.remove();
+  const el = createCircleElement(14, "#4285f4");
+  el.title = `Your location (±${Math.round(position.accuracy)} m)`;
+  currentLocationMarker = new mapboxgl.Marker({ element: el }).setLngLat([position.lng, position.lat]).addTo(map);
+}
+
+// Route path is drawn as a GeoJSON line layer rather than a Marker-style
+// polyline object — Mapbox GL has no Polyline class, sources/layers are how
+// any line gets drawn, and both need the map's style to be loaded first.
+function setRouteLine(path) {
+  if (!map || !mapReady.value) return;
+  const geojson = {
+    type: "Feature",
+    geometry: { type: "LineString", coordinates: path.map((point) => [point.lng, point.lat]) },
+  };
+  if (map.getSource("route")) {
+    map.getSource("route").setData(geojson);
+  } else if (path.length) {
+    map.addSource("route", { type: "geojson", data: geojson });
+    map.addLayer({
+      id: "route-line",
+      type: "line",
+      source: "route",
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": "#2f6f5f", "line-width": 5, "line-opacity": 0.85 },
+    });
+  }
 }
 
 function renderMapLayer() {
@@ -136,57 +153,34 @@ function renderMapLayer() {
 
   const path = activeRoute.value.path ?? [];
 
-  routePolyline?.setMap(null);
-  if (path.length) {
-    routePolyline = new google.maps.Polyline({
-      path,
-      strokeColor: "#2f6f5f",
-      strokeWeight: 5,
-      strokeOpacity: 0.85,
-      map,
-    });
-  }
+  setRouteLine(path);
 
-  startMarker?.setMap(null);
+  startMarker?.remove();
   if (path.length) {
-    startMarker = new google.maps.Marker({
-      position: path[0],
-      map,
-      title: "Start",
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 8,
-        fillColor: "#2f6f5f",
-        fillOpacity: 1,
-        strokeColor: "#fffdf9",
-        strokeWeight: 3,
-      },
-    });
+    const el = createCircleElement(16, "#2f6f5f");
+    el.title = "Start";
+    startMarker = new mapboxgl.Marker({ element: el }).setLngLat([path[0].lng, path[0].lat]).addTo(map);
   }
 
   clearRefugeMarkers();
   if (showRefuges.value) {
-    refugeMarkers = quietSpaces.value.map(
-      (space) =>
-        new google.maps.Marker({
-          position: { lat: space.lat, lng: space.lng },
-          map,
-          title: space.label,
-          icon: {
-            url: REFUGE_ICON_URL,
-            scaledSize: new google.maps.Size(34, 34),
-            anchor: new google.maps.Point(17, 17),
-          },
-        })
-    );
+    refugeMarkers = quietSpaces.value.map((space) => {
+      const el = document.createElement("div");
+      el.style.width = "34px";
+      el.style.height = "34px";
+      el.style.backgroundImage = `url("${REFUGE_ICON_URL}")`;
+      el.style.backgroundSize = "contain";
+      el.title = space.label;
+      return new mapboxgl.Marker({ element: el }).setLngLat([space.lng, space.lat]).addTo(map);
+    });
   }
 
-  const bounds = new google.maps.LatLngBounds();
-  path.forEach((point) => bounds.extend(point));
+  const bounds = new mapboxgl.LngLatBounds();
+  path.forEach((point) => bounds.extend([point.lng, point.lat]));
   if (showRefuges.value) {
-    quietSpaces.value.forEach((space) => bounds.extend({ lat: space.lat, lng: space.lng }));
+    quietSpaces.value.forEach((space) => bounds.extend([space.lng, space.lat]));
   }
-  if (!bounds.isEmpty()) map.fitBounds(bounds, 48);
+  if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 48 });
 }
 
 // "Always show refuge spaces" preference — when off, quiet-space markers stay off the map.
@@ -226,8 +220,9 @@ function clearRouteView() {
   alert.value = null;
   forecast.value = null;
   clearRefugeMarkers();
-  routePolyline?.setMap(null);
-  startMarker?.setMap(null);
+  setRouteLine([]);
+  startMarker?.remove();
+  startMarker = null;
 }
 
 async function loadMap() {
@@ -278,8 +273,15 @@ async function loadPedestrianCounts() {
   renderSensorMarkers();
 }
 
-onMounted(async () => {
-  await initMap();
+onMounted(() => {
+  // The route summary panel is pure data (backend calls) and doesn't need
+  // the map to be ready — don't make it wait on Mapbox's tile/style load,
+  // which is the slower of the two. Once the map does finish, re-render
+  // whatever route/sensor data already arrived while it was loading.
+  initMap().then(() => {
+    renderMapLayer();
+    renderSensorMarkers();
+  });
   loadMap();
   loadPedestrianCounts();
   stopLocationWatch = watchCurrentLocation(
@@ -293,10 +295,10 @@ watch(showRefuges, renderMapLayer);
 onBeforeUnmount(() => {
   clearRefugeMarkers();
   clearSensorMarkers();
-  routePolyline?.setMap(null);
-  startMarker?.setMap(null);
-  currentLocationMarker?.setMap(null);
+  startMarker?.remove();
+  currentLocationMarker?.remove();
   stopLocationWatch?.();
+  map?.remove();
 });
 
 function reroute() {

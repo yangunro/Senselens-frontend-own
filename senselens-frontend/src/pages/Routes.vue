@@ -76,6 +76,7 @@ async function loadRoutes() {
     routeOptions.value = await getRouteOptions(destination.value, effectiveDestinationPoint, origin);
   } catch (err) {
     if (sequence !== loadSequence) return;
+    console.warn("Route generation failed:", err);
     routeError.value = "We couldn't calculate a route right now. Please try again.";
     loading.value = false;
     return;
