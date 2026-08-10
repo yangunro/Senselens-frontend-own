@@ -3,7 +3,10 @@ import { apiGet, delay, API_BASE } from "./http";
 // Fallback starting point when real geolocation isn't available (denied,
 // unsupported, or too inaccurate) — Flinders Street Station, matching the
 // old fixed-origin mock behaviour and the map mock data (see services/map.js).
-const FALLBACK_ORIGIN = { lat: -37.8183, lng: 144.9671 };
+// Also happens to sit right next to the live pedestrian sensors currently
+// reporting the most data (Flinders Ln / Degraves St), so it's a reasonable
+// default for seeing a real sensory score without granting location.
+export const FALLBACK_ORIGIN = { lat: -37.8183, lng: 144.9671 };
 
 const mockRouteOptions = [
   {

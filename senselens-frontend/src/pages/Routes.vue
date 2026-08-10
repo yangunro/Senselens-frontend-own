@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
-import { getRouteOptions } from "../services/routes";
+import { FALLBACK_ORIGIN, getRouteOptions } from "../services/routes";
 import { getAccurateCurrentLocation } from "../services/geolocation";
 import { geocodeAddress } from "../services/geocode";
 import { API_BASE } from "../services/http";
@@ -28,6 +28,7 @@ const loading = ref(true);
 const locationAccuracy = ref(null);
 const locationError = ref("");
 const routeError = ref("");
+const usingFallbackOrigin = ref(false);
 
 let loadSequence = 0;
 
@@ -37,6 +38,7 @@ async function loadRoutes() {
   locationAccuracy.value = null;
   locationError.value = "";
   routeError.value = "";
+  usingFallbackOrigin.value = false;
 
   let effectiveDestinationPoint = destinationPoint.value;
   let origin;
@@ -66,9 +68,15 @@ async function loadRoutes() {
       locationAccuracy.value = Math.round(origin.accuracy);
     } catch (err) {
       if (sequence !== loadSequence) return;
+      // Real location isn't available (denied, unsupported, too
+      // inaccurate) — fall back to a fixed starting point rather than
+      // dead-ending here. The UI says so explicitly (see
+      // usingFallbackOrigin below) instead of quietly pretending this
+      // is the user's real location, and "try location again" is still
+      // offered.
       locationError.value = err.message || "Unable to determine your current location.";
-      loading.value = false;
-      return;
+      origin = FALLBACK_ORIGIN;
+      usingFallbackOrigin.value = true;
     }
   }
 
@@ -103,12 +111,14 @@ function startCalmRoute() {
       </button>
 
       <div>
-        <h1 v-if="API_BASE">Current location to {{ destination }}</h1>
+        <h1 v-if="usingFallbackOrigin">Flinders Street Station to {{ destination }}</h1>
+        <h1 v-else-if="API_BASE">Current location to {{ destination }}</h1>
         <h1 v-else>Southern Cross Station to {{ destination }}</h1>
 
         <p v-if="!API_BASE">Choose a route that matches your comfort level</p>
         <p v-else-if="locationAccuracy">Location accuracy: ±{{ locationAccuracy }} m</p>
-        <p v-else-if="!locationError && !routeError">Finding your precise starting location…</p>
+        <p v-else-if="usingFallbackOrigin">Using an approximate starting point</p>
+        <p v-else-if="!routeError">Finding your precise starting location…</p>
       </div>
     </header>
 
@@ -124,19 +134,20 @@ function startCalmRoute() {
       </div>
     </div>
 
-    <div v-else-if="locationError" class="route-error">
-      <strong>We need your location to calculate an accurate route.</strong>
-      <p>{{ locationError }}</p>
-      <button type="button" class="retry-button" @click="loadRoutes">Try location again</button>
-    </div>
-
     <div v-else-if="routeError" class="route-error">
       <strong>We couldn't generate a route.</strong>
       <p>{{ routeError }}</p>
       <button type="button" class="retry-button" @click="loadRoutes">Try again</button>
     </div>
 
-    <div v-else class="route-list">
+    <template v-else>
+      <div v-if="usingFallbackOrigin" class="route-error location-fallback-note">
+        <strong>Starting from Flinders Street Station (approximate).</strong>
+        <p>{{ locationError }}</p>
+        <button type="button" class="retry-button" @click="loadRoutes">Try my real location</button>
+      </div>
+
+      <div class="route-list">
       <button
         v-for="option in routeOptions"
         :key="option.id"
@@ -173,11 +184,12 @@ function startCalmRoute() {
           <span v-if="option.footnote" class="footnote">{{ option.footnote }}</span>
         </div>
       </button>
-    </div>
+      </div>
 
-    <button v-if="!locationError && !routeError" class="start-button" :disabled="!selectedId" @click="startCalmRoute">
-      Start calm route
-    </button>
+      <button class="start-button" :disabled="!selectedId" @click="startCalmRoute">
+        Start calm route
+      </button>
+    </template>
   </PageShell>
 </template>
 
@@ -218,6 +230,10 @@ function startCalmRoute() {
 
   color: var(--color-text-muted);
   font-size: 13px;
+}
+
+.location-fallback-note {
+  margin-bottom: 10px;
 }
 
 .route-error {
