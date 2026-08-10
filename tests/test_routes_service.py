@@ -3,10 +3,41 @@ from unittest.mock import patch
 
 import polyline
 
-from app.services.routes_service import get_route, get_routes
+from app.services.routes_service import (
+    get_route,
+    get_route_forecast,
+    get_routes,
+)
 
 
 class RoutesServiceTests(unittest.TestCase):
+    def test_dynamic_route_forecast_uses_nearby_sensors(self):
+        dynamic_route = {
+            "nearbySensors": [{"sensorId": 7, "name": "Test sensor"}],
+            "pedestrianObservedAt": "2026-08-10T09:00:00+10:00",
+        }
+        forecast = {"level": "medium"}
+
+        with (
+            patch(
+                "app.services.routes_service.get_dynamic_route",
+                return_value=dynamic_route,
+            ),
+            patch(
+                "app.services.routes_service.build_pedestrian_forecast",
+                return_value=forecast,
+            ) as build_forecast,
+        ):
+            result = get_route_forecast("route-1")
+
+        self.assertEqual(result, forecast)
+        build_forecast.assert_called_once_with(
+            dynamic_route["nearbySensors"],
+            route_id="route-1",
+            horizon_hours=3,
+            data_as_of=dynamic_route["pedestrianObservedAt"],
+        )
+
     def test_selected_destination_uses_coordinate_waypoint(self):
         with (
             patch(

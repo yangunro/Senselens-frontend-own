@@ -1,5 +1,3 @@
-from datetime import datetime, timedelta, timezone
-
 from sqlalchemy import text
 
 from app.database import engine
@@ -8,6 +6,7 @@ from app.services.dynamic_route_store import (
     save_dynamic_routes,
 )
 from app.services.google_routes_service import get_google_routes
+from app.services.forecast_service import build_pedestrian_forecast
 from app.services.pedestrian_service import (
     get_latest_pedestrian_snapshot,
 )
@@ -353,165 +352,71 @@ def get_route_alerts(route_id):
 
     return alerts
 
-def _forecast_from_history(dynamic_route):
-    """
-    Estimate whether the upcoming hour will be busier or quieter
-    than usual for this route's nearby sensors, using real
-    historical hourly counts (same hour-of-day, same day-of-week)
-    from PedestrianHourlyHistory.
+def get_route_forecast(route_id):
+    dynamic_route = get_dynamic_route(route_id)
 
-    This is a historical-pattern heuristic, not a machine-learning
-    prediction. It compares each nearby sensor's typical count for
-    the upcoming hour+weekday against that same sensor's own
-    overall average, so it is calibrated per-location rather than
-    against an unrelated scale.
-    """
-
-    nearby_sensors = dynamic_route.get("nearbySensors") or []
-
-    if not nearby_sensors:
-        return None
-
-    sensor_ids = [sensor["sensorId"] for sensor in nearby_sensors]
-
-    now = datetime.now(timezone.utc)
-    target_time = now + timedelta(hours=1)
-    target_hour = target_time.hour
-    # Postgres EXTRACT(DOW): Sunday=0 .. Saturday=6.
-    target_dow = target_time.isoweekday() % 7
+    if dynamic_route is not None:
+        return build_pedestrian_forecast(
+            dynamic_route.get("nearbySensors", []),
+            route_id=route_id,
+            horizon_hours=3,
+            data_as_of=dynamic_route.get("pedestrianObservedAt"),
+        )
 
     query = text("""
         SELECT
-            "SensorID" AS sensor_id,
-            AVG("HourlyCount") FILTER (
-                WHERE "HourDay" = :target_hour
-                  AND EXTRACT(DOW FROM "SensingDate") = :target_dow
-            ) AS upcoming_hour_avg,
-            AVG("HourlyCount") AS overall_avg
-        FROM "PedestrianHourlyHistory"
-        WHERE "SensorID" = ANY(:sensor_ids)
-        GROUP BY "SensorID";
+            rs."SensorID" AS sensor_id,
+            sl."SensorDescription" AS sensor_name,
+            sl."Lat" AS lat,
+            sl."Lng" AS lng,
+            latest."DateTimeMinute" AS observed_at
+        FROM "RouteSensor" rs
+        JOIN "SensorLocation" sl
+            ON sl."SensorID" = rs."SensorID"
+        LEFT JOIN LATERAL (
+            SELECT pc."DateTimeMinute"
+            FROM "PedestrianCount" pc
+            WHERE pc."SensorID" = rs."SensorID"
+            ORDER BY pc."DateTimeMinute" DESC
+            LIMIT 1
+        ) latest ON TRUE
+        WHERE rs."RouteID" = :route_id
+          AND sl."Status" = 'A'
+          AND sl."Lat" IS NOT NULL
+          AND sl."Lng" IS NOT NULL
+        ORDER BY rs."SequenceOrder", rs."SensorID";
     """)
 
     with engine.connect() as conn:
         rows = conn.execute(
             query,
-            {
-                "sensor_ids": sensor_ids,
-                "target_hour": target_hour,
-                "target_dow": target_dow,
-            },
+            {"route_id": route_id},
         ).mappings().all()
 
-    history_by_sensor = {row["sensor_id"]: row for row in rows}
-
-    weighted_ratio_total = 0.0
-    total_weight = 0.0
-    matched_sensor_count = 0
-
-    for sensor in nearby_sensors:
-        history = history_by_sensor.get(sensor["sensorId"])
-
-        if (
-            history is None
-            or history["upcoming_hour_avg"] is None
-            or not history["overall_avg"]
-        ):
-            continue
-
-        ratio = (
-            float(history["upcoming_hour_avg"])
-            / float(history["overall_avg"])
-        )
-
-        distance = sensor["distanceFromRouteM"]
-        weight = 1 / (1 + distance / 50)
-
-        weighted_ratio_total += ratio * weight
-        total_weight += weight
-        matched_sensor_count += 1
-
-    if matched_sensor_count == 0 or total_weight == 0:
+    if not rows:
         return None
 
-    forecast_ratio = weighted_ratio_total / total_weight
+    observed_values = [
+        row["observed_at"]
+        for row in rows
+        if row["observed_at"] is not None
+    ]
+    data_as_of = max(observed_values).isoformat() if observed_values else None
 
-    if forecast_ratio < 0.85:
-        level, level_label = "low", "LOW SENSORY"
-    elif forecast_ratio < 1.25:
-        level, level_label = "medium", "MEDIUM SENSORY"
-    else:
-        level, level_label = "high", "HIGH SENSORY"
-
-    return {
-        "routeId": str(dynamic_route["id"]),
-        "sensoryIndicator": level_label,
-        "level": level,
-        "forecastRatio": round(forecast_ratio, 2),
-        "matchedSensorCount": matched_sensor_count,
-        "forecastFor": target_time.isoformat(),
-        "basis": (
-            f"Historical pedestrian counts for "
-            f"{matched_sensor_count} nearby sensor(s) at this "
-            "hour and day of week, compared to each sensor's own "
-            "typical hourly average."
-        ),
-        "computedAt": now.isoformat(),
-    }
-
-
-def get_route_forecast(route_id):
-    dynamic_route = get_dynamic_route(route_id)
-
-    if dynamic_route is not None:
-        return _forecast_from_history(dynamic_route)
-
-    query = text("""
-        SELECT
-            "SensoryIndicator",
-            "PedestrianDensityScore",
-            "ConstructionExposureScore",
-            "LightingComfortScore",
-            "ComputedAt"
-        FROM "SensoryScore"
-        WHERE "RouteID" = :route_id
-        ORDER BY "ComputedAt" DESC
-        LIMIT 1;
-    """)
-
-    with engine.connect() as conn:
-        row = conn.execute(
-            query,
-            {"route_id": route_id},
-        ).mappings().first()
-
-    if row is None:
-        return None
-
-    return {
-        "routeId": str(route_id),
-        "sensoryIndicator": row["SensoryIndicator"],
-        "pedestrianDensityScore": (
-            float(row["PedestrianDensityScore"])
-            if row["PedestrianDensityScore"] is not None
-            else None
-        ),
-        "constructionExposureScore": (
-            float(row["ConstructionExposureScore"])
-            if row["ConstructionExposureScore"] is not None
-            else None
-        ),
-        "lightingComfortScore": (
-            float(row["LightingComfortScore"])
-            if row["LightingComfortScore"] is not None
-            else None
-        ),
-        "computedAt": (
-            row["ComputedAt"].isoformat()
-            if row["ComputedAt"] is not None
-            else None
-        ),
-    }
+    return build_pedestrian_forecast(
+        [
+            {
+                "sensorId": row["sensor_id"],
+                "name": row["sensor_name"],
+                "lat": float(row["lat"]),
+                "lng": float(row["lng"]),
+            }
+            for row in rows
+        ],
+        route_id=route_id,
+        horizon_hours=3,
+        data_as_of=data_as_of,
+    )
 
 def get_route_quiet_spaces(route_id):
     dynamic_route = get_dynamic_route(route_id)

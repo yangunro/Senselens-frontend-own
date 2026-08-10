@@ -4,6 +4,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.forecast_service import ForecastModelUnavailable
 
 
 class RoutesApiTests(unittest.TestCase):
@@ -86,6 +87,46 @@ class RoutesApiTests(unittest.TestCase):
             -37.8102,
             144.9628,
         )
+
+    def test_route_forecast_returns_service_unavailable_without_model(self):
+        route_id = "8af6859d-e9e6-4f34-b747-19951af3444c"
+
+        with patch(
+            "app.routers.routes.get_route_forecast",
+            side_effect=ForecastModelUnavailable("Model is unavailable."),
+        ):
+            response = self.client.get(f"/routes/{route_id}/forecast")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Model is unavailable.")
+
+    def test_map_wide_forecast_accepts_horizon_alias(self):
+        service_result = {
+            "horizonHours": 2,
+            "forecasts": [],
+            "alerts": [],
+        }
+
+        with patch(
+            "app.routers.pedestrian.get_active_sensor_forecast",
+            return_value=service_result,
+        ) as get_forecast:
+            response = self.client.get(
+                "/pedestrian-forecasts",
+                params={"horizonHours": 2},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), service_result)
+        get_forecast.assert_called_once_with(horizon_hours=2)
+
+    def test_map_wide_forecast_rejects_more_than_three_hours(self):
+        response = self.client.get(
+            "/pedestrian-forecasts",
+            params={"horizonHours": 4},
+        )
+
+        self.assertEqual(response.status_code, 422)
 
 
 if __name__ == "__main__":

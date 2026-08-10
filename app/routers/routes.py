@@ -16,6 +16,7 @@ from app.services.google_routes_service import (
     GoogleRoutesConfigurationError,
     GoogleRoutesProviderError,
 )
+from app.services.forecast_service import ForecastModelUnavailable
 
 
 router = APIRouter()
@@ -157,7 +158,13 @@ def route_alerts(route_id: UUID):
 
 @router.get("/routes/{route_id}/forecast")
 def route_forecast(route_id: UUID):
-    forecast = get_route_forecast(route_id)
+    try:
+        forecast = get_route_forecast(route_id)
+    except ForecastModelUnavailable as error:
+        raise HTTPException(
+            status_code=503,
+            detail=str(error),
+        ) from error
 
     if forecast is None:
         raise HTTPException(

@@ -226,6 +226,7 @@ This keeps HTTP handling separate from database and application logic.
 | POST | `/preferences` | Save/update sensory preferences | Implemented |
 | GET | `/cbd-status` | Retrieve current CBD activity status | Implemented |
 | GET | `/pedestrian-counts/latest` | Retrieve the latest sensor readings and coordinates | Implemented |
+| GET | `/pedestrian-forecasts?horizonHours=3` | Retrieve map-wide per-sensor crowd predictions | Implemented |
 | GET | `/refuges` | Retrieve refuge locations | Implemented |
 | GET | `/saved-routes` | Retrieve saved routes | Implemented |
 | POST | `/saved-routes` | Save a route | Implemented |
@@ -314,7 +315,7 @@ The backend does **not fabricate refuge locations**.
 | GET | `/routes` | Retrieve stored routes | Implemented |
 | GET | `/routes/{route_id}` | Retrieve a specific route | Implemented |
 | GET | `/routes/{route_id}/alerts` | Retrieve route alerts | Implemented |
-| GET | `/routes/{route_id}/forecast` | Retrieve latest available sensory state | Implemented |
+| GET | `/routes/{route_id}/forecast` | Retrieve 1-3 hour route crowd predictions | Implemented |
 | GET | `/routes/{route_id}/quiet-spaces` | Retrieve quiet/refuge spaces associated with a route | API contract implemented |
 
 ### Route Forecast
@@ -325,19 +326,44 @@ The endpoint:
 GET /routes/{route_id}/forecast
 ```
 
-currently retrieves the latest available `SensoryScore` information for a route.
+returns per-sensor pedestrian predictions for the next 1, 2, and 3 hours.
+The model is a per-sensor linear regression trained offline from
+`PedestrianHourlyHistory`; the committed artifact is loaded by FastAPI at
+request time, so the API does not retrain the model for every request.
 
-The response may contain:
+The current artifact was trained from 1,225,895 hourly observations covering
+2025-01-01 through 2026-08-09. It predicts pedestrians per minute from time
+trend, hour-of-day, day-of-week, and weekend features. Sensors without enough
+history use the global fallback regression.
+
+The response preserves the fields consumed by the Map page and also provides
+detailed forecasts and alerts:
 
 ```json
 {
   "routeId": "...",
-  "sensoryIndicator": "...",
-  "pedestrianDensityScore": 0.0,
-  "constructionExposureScore": 0.0,
-  "lightingComfortScore": 0.0,
-  "computedAt": "..."
+  "sensoryIndicator": "HIGH SENSORY",
+  "level": "high",
+  "basis": "...",
+  "horizonHours": 3,
+  "hasPredictiveAlert": true,
+  "forecasts": [
+    {
+      "hoursAhead": 1,
+      "forecastAt": "...",
+      "maximumPredictedCountPerMinute": 21,
+      "sensors": []
+    }
+  ],
+  "alerts": []
 }
+```
+
+The rounded prediction bands are Low 0-5, Medium 6-14, and High 15+.
+For map-wide prediction markers, use:
+
+```text
+GET /pedestrian-forecasts?horizonHours=3
 ```
 
 If no sensory/forecast information is available, the API returns:
@@ -354,29 +380,12 @@ with:
 HTTP 404
 ```
 
-### Important Forecast Limitation
-
-This is currently an **API contract for the latest sensory state**, not a true predictive forecasting model.
-
-A future forecasting system may use:
+If the model artifact is absent or incompatible, the API returns HTTP 503.
+Retrain it after refreshing historical data with:
 
 ```text
-Historical pedestrian activity
-          +
-Current pedestrian activity
-          +
-Time of day
-          +
-Day of week
-          +
-Environmental conditions
-          ↓
-Forecasting Model
-          ↓
-Expected Route Conditions
+python -m scripts.train_pedestrian_forecast
 ```
-
-The API endpoint can remain stable while the internal forecasting implementation evolves.
 
 ---
 

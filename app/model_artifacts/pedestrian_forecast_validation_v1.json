@@ -1,0 +1,125 @@
+{
+  "comparison": {
+    "maeImprovementPercent": -70.73,
+    "rmseImprovementPercent": -35.98
+  },
+  "historicalWeekdayHourBaseline": {
+    "actualBandRows": {
+      "high": 12190,
+      "low": 60656,
+      "medium": 17143
+    },
+    "bandAccuracy": 0.9119,
+    "confusionMatrix": {
+      "high": {
+        "high": 10928,
+        "low": 48,
+        "medium": 1214
+      },
+      "low": {
+        "high": 53,
+        "low": 56933,
+        "medium": 3670
+      },
+      "medium": {
+        "high": 1464,
+        "low": 1483,
+        "medium": 14196
+      }
+    },
+    "highPrecision": 0.8781,
+    "highRecall": 0.8965,
+    "macroF1": 0.8756,
+    "mae": 1.255,
+    "predictedBandRows": {
+      "high": 12445,
+      "low": 58464,
+      "medium": 19080
+    },
+    "r2": 0.9106,
+    "rmse": 2.8465,
+    "rows": 89989
+  },
+  "linearRegression": {
+    "actualBandRows": {
+      "high": 12190,
+      "low": 60656,
+      "medium": 17143
+    },
+    "bandAccuracy": 0.8467,
+    "confusionMatrix": {
+      "high": {
+        "high": 10104,
+        "low": 83,
+        "medium": 2003
+      },
+      "low": {
+        "high": 93,
+        "low": 53783,
+        "medium": 6780
+      },
+      "medium": {
+        "high": 2740,
+        "low": 2095,
+        "medium": 12308
+      }
+    },
+    "highPrecision": 0.781,
+    "highRecall": 0.8289,
+    "macroF1": 0.7901,
+    "mae": 2.1426,
+    "predictedBandRows": {
+      "high": 12937,
+      "low": 55961,
+      "medium": 21091
+    },
+    "r2": 0.8346,
+    "rmse": 3.8707,
+    "rows": 89989
+  },
+  "method": "chronological holdout retraining",
+  "modelVersion": "pedestrian-linear-v1",
+  "perSensorLinearRegression": {
+    "bandAccuracy": {
+      "maximum": 1.0,
+      "median": 0.8347,
+      "minimum": 0.5311,
+      "p25": 0.7818,
+      "p75": 0.955
+    },
+    "mae": {
+      "maximum": 7.7511,
+      "median": 1.8252,
+      "minimum": 0.0357,
+      "p25": 0.8195,
+      "p75": 2.7418
+    },
+    "r2": {
+      "maximum": 0.9219,
+      "median": 0.678,
+      "minimum": -0.5392,
+      "p25": 0.5113,
+      "p75": 0.8046
+    },
+    "rmse": {
+      "maximum": 10.7092,
+      "median": 2.4992,
+      "minimum": 0.0434,
+      "p25": 1.0702,
+      "p75": 4.1416
+    },
+    "sensorCount": 100
+  },
+  "schemaVersion": 1,
+  "split": {
+    "globalFallbackValidationRows": 0,
+    "holdoutDays": 42,
+    "trainedSensorModels": 100,
+    "trainingEnd": "2026-06-28",
+    "trainingRows": 1135906,
+    "validationEnd": "2026-08-09",
+    "validationRows": 89989,
+    "validationStart": "2026-06-29"
+  },
+  "validatedAt": "2026-08-10T07:43:08.108312+00:00"
+}
