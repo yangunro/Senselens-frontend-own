@@ -701,7 +701,7 @@ function reroute() {
   position: relative;
   overflow: hidden;
 
-  height: 340px;
+  height: 480px;
 
   margin-top: 16px;
 
@@ -892,7 +892,7 @@ function reroute() {
 
 @media (min-width: 768px) {
   .map-area {
-    height: 420px;
+    height: 560px;
   }
 }
 
