@@ -6,7 +6,15 @@ import PageShell from "../components/PageShell.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import ProgressBar from "../components/ProgressBar.vue";
-import { getRouteDetail, getQuietSpaces, getSensoryAlert, getForecast, getPedestrianCounts } from "../services/map";
+import SegmentedTabs from "../components/SegmentedTabs.vue";
+import {
+  getRouteDetail,
+  getQuietSpaces,
+  getSensoryAlert,
+  getForecast,
+  getPedestrianCounts,
+  getPedestrianForecast,
+} from "../services/map";
 import { FALLBACK_ORIGIN, getRouteOptions } from "../services/routes";
 import { watchCurrentLocation, getAccurateCurrentLocation } from "../services/geolocation";
 import { openExternalNavigation } from "../services/externalNavigation";
@@ -21,8 +29,31 @@ const quietSpaces = ref([]);
 const alert = ref(null);
 const forecast = ref(null);
 const pedestrianCounts = ref(null);
+const pedestrianForecast = ref(null);
+// "live" shows real-time sensor readings; "1"/"2"/"3" show that many hours'
+// predicted crowding instead.
+const sensorViewMode = ref("live");
 const alertDismissed = ref(false);
 const loading = ref(true);
+
+const sensorViewOptions = [
+  { value: "live", label: "Now" },
+  { value: "1", label: "1h" },
+  { value: "2", label: "2h" },
+  { value: "3", label: "3h" },
+];
+
+const LEVEL_COLOR = { low: "#2f8f6f", medium: "#a97a1f", high: "#b8563d" };
+
+const forecastForSelectedHour = computed(() => {
+  if (sensorViewMode.value === "live") return null;
+  return pedestrianForecast.value?.forecasts?.find((f) => f.hoursAhead === Number(sensorViewMode.value)) ?? null;
+});
+
+const alertsForSelectedHour = computed(() => {
+  if (sensorViewMode.value === "live") return [];
+  return (pedestrianForecast.value?.alerts ?? []).filter((a) => a.hoursAhead === Number(sensorViewMode.value));
+});
 
 const MELBOURNE_CBD = { lat: -37.8136, lng: 144.9631 };
 
@@ -113,16 +144,33 @@ function clearSensorMarkers() {
 
 // Real-time pedestrian sensor readings, colour-coded on the same low/medium/high
 // scale as everything else in the app — relative to today's busiest sensor.
+// Switches to predicted crowding for the selected hour when sensorViewMode
+// isn't "live", using the same marker styling either way.
 function renderSensorMarkers() {
   clearSensorMarkers();
-  if (!map || !pedestrianCounts.value?.sensors?.length) return;
+  if (!map) return;
 
-  const max = pedestrianCounts.value.maximumCount || 1;
-  sensorMarkers = pedestrianCounts.value.sensors.map((sensor) => {
-    const ratio = sensor.minuteCount / max;
-    const color = ratio > 0.66 ? "#b8563d" : ratio > 0.33 ? "#a97a1f" : "#2f8f6f";
+  if (sensorViewMode.value === "live") {
+    if (!pedestrianCounts.value?.sensors?.length) return;
+    const max = pedestrianCounts.value.maximumCount || 1;
+    sensorMarkers = pedestrianCounts.value.sensors.map((sensor) => {
+      const ratio = sensor.minuteCount / max;
+      const color = ratio > 0.66 ? LEVEL_COLOR.high : ratio > 0.33 ? LEVEL_COLOR.medium : LEVEL_COLOR.low;
+      const el = createCircleElement((6 + ratio * 6) * 2, color, { strokeColor: color, strokeWidth: 1, opacity: 0.4 });
+      el.title = `${sensor.name}: ${sensor.minuteCount} pedestrians/min`;
+      return new mapboxgl.Marker({ element: el }).setLngLat([sensor.lng, sensor.lat]).addTo(map);
+    });
+    return;
+  }
+
+  const hourData = forecastForSelectedHour.value;
+  if (!hourData?.sensors?.length) return;
+  const max = Math.max(...hourData.sensors.map((s) => s.predictedCountPerMinute), 1);
+  sensorMarkers = hourData.sensors.map((sensor) => {
+    const ratio = sensor.predictedCountPerMinute / max;
+    const color = LEVEL_COLOR[sensor.level] ?? LEVEL_COLOR.low;
     const el = createCircleElement((6 + ratio * 6) * 2, color, { strokeColor: color, strokeWidth: 1, opacity: 0.4 });
-    el.title = `${sensor.name}: ${sensor.minuteCount} pedestrians/min`;
+    el.title = `${sensor.name}: ~${sensor.predictedCountPerMinute} pedestrians/min predicted in ${sensorViewMode.value}h`;
     return new mapboxgl.Marker({ element: el }).setLngLat([sensor.lng, sensor.lat]).addTo(map);
   });
 }
@@ -303,6 +351,13 @@ async function loadPedestrianCounts() {
   renderSensorMarkers();
 }
 
+async function loadPedestrianForecast() {
+  // Always fetched at the full 3-hour horizon — the 1h/2h/3h toggle just
+  // switches which already-loaded hour's data is shown, no re-fetching.
+  pedestrianForecast.value = await getPedestrianForecast();
+  if (sensorViewMode.value !== "live") renderSensorMarkers();
+}
+
 onMounted(() => {
   // The route summary panel is pure data (backend calls) and doesn't need
   // the map to be ready — don't make it wait on Mapbox's tile/style load,
@@ -314,6 +369,7 @@ onMounted(() => {
   });
   loadMap();
   loadPedestrianCounts();
+  loadPedestrianForecast();
   stopLocationWatch = watchCurrentLocation(
     renderCurrentLocationMarker,
     (err) => console.warn("Live location update failed:", err)
@@ -321,6 +377,7 @@ onMounted(() => {
 });
 watch(() => route.query.route, loadMap);
 watch(showRefuges, renderMapLayer);
+watch(sensorViewMode, renderSensorMarkers);
 
 onBeforeUnmount(() => {
   clearRefugeMarkers();
@@ -344,6 +401,19 @@ function reroute() {
   <PageShell>
     <div class="map-shell">
       <div class="map-overlays">
+        <div class="sensor-view-toggle">
+          <SegmentedTabs v-model="sensorViewMode" :options="sensorViewOptions" />
+        </div>
+
+        <div v-if="alertsForSelectedHour.length" class="forecast-alerts">
+          <Icon class="forecast-icon" name="alert" :size="16" />
+
+          <div>
+            <strong>{{ alertsForSelectedHour.length }} area{{ alertsForSelectedHour.length > 1 ? "s" : "" }} may get busy</strong>
+            <p v-for="(item, index) in alertsForSelectedHour.slice(0, 3)" :key="index">{{ item.message }}</p>
+          </div>
+        </div>
+
         <transition name="fade">
           <div v-if="activeBanner" class="alert-banner">
             <div class="alert-text">
@@ -455,6 +525,45 @@ function reroute() {
 </template>
 
 <style scoped>
+.sensor-view-toggle {
+  align-self: flex-start;
+}
+
+.sensor-view-toggle :deep(.segmented-tabs) {
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.forecast-alerts {
+  display: flex;
+  align-items: flex-start;
+
+  gap: 11px;
+  padding: 15px 16px;
+
+  margin-top: 12px;
+
+  background: var(--color-alert-bg);
+  border: 1px solid var(--color-alert-border);
+  border-radius: var(--radius-md);
+}
+
+.forecast-alerts strong {
+  display: block;
+
+  color: #6b4d16;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.forecast-alerts p {
+  margin: 4px 0 0;
+
+  color: #8a6a2a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .alert-banner {
   display: flex;
   align-items: center;
