@@ -5,7 +5,7 @@ from app.services.dynamic_route_store import (
     get_dynamic_route,
     save_dynamic_routes,
 )
-from app.services.google_routes_service import get_google_routes
+from app.services.mapbox_routes_service import get_mapbox_routes
 from app.services.forecast_service import build_pedestrian_forecast
 from app.services.pedestrian_service import (
     get_latest_pedestrian_snapshot,
@@ -64,7 +64,7 @@ def get_routes(
             )
             else destination
         )
-        routes = get_google_routes(
+        routes = get_mapbox_routes(
             origin,
             destination_waypoint,
         )

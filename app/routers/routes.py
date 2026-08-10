@@ -12,9 +12,9 @@ from app.services.routes_service import (
     get_routes,
     save_route_sensors,
 )
-from app.services.google_routes_service import (
-    GoogleRoutesConfigurationError,
-    GoogleRoutesProviderError,
+from app.services.mapbox_routes_service import (
+    MapboxRoutesConfigurationError,
+    MapboxRoutesProviderError,
 )
 from app.services.forecast_service import ForecastModelUnavailable
 
@@ -111,12 +111,12 @@ def routes(
             destination_lng,
             avoid_construction,
         )
-    except GoogleRoutesConfigurationError as error:
+    except MapboxRoutesConfigurationError as error:
         raise HTTPException(
             status_code=503,
             detail=str(error),
         ) from error
-    except GoogleRoutesProviderError as error:
+    except MapboxRoutesProviderError as error:
         raise HTTPException(
             status_code=502,
             detail=str(error),
