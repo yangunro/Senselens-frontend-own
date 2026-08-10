@@ -37,6 +37,10 @@ const pedestrianForecast = ref(null);
 const sensorViewMode = ref("live");
 const alertDismissed = ref(false);
 const loading = ref(true);
+// Heatmap on by default — a density picture of where the crowds are reads
+// faster than a scatter of small dots; the dots stay available as a toggle
+// for anyone who wants exact per-sensor readings.
+const heatmapVisible = ref(true);
 
 const sensorViewOptions = [
   { value: "live", label: "Now" },
@@ -151,6 +155,10 @@ function clearSensorMarkers() {
 function renderSensorMarkers() {
   clearSensorMarkers();
   if (!map) return;
+  // The heatmap already shows crowd density — don't stack individual dots
+  // on top of it too, that's redundant and busy. Dots come back when the
+  // user switches to the "Points" view.
+  if (heatmapVisible.value) return;
 
   if (sensorViewMode.value === "live") {
     if (!pedestrianCounts.value?.sensors?.length) return;
@@ -175,6 +183,77 @@ function renderSensorMarkers() {
     el.title = `${sensor.name}: ~${sensor.predictedCountPerMinute} pedestrians/min predicted in ${sensorViewMode.value}h`;
     return new mapboxgl.Marker({ element: el }).setLngLat([sensor.lng, sensor.lat]).addTo(map);
   });
+}
+
+// Same underlying sensor readings as renderSensorMarkers, reshaped into a
+// GeoJSON point source so Mapbox's native `heatmap` layer type can do the
+// density blending — far more legible than a scatter of dots once there
+// are a few dozen sensors on screen at once.
+function crowdHeatmapFeatures() {
+  if (sensorViewMode.value === "live") {
+    const sensors = pedestrianCounts.value?.sensors ?? [];
+    const max = pedestrianCounts.value?.maximumCount || 1;
+    return sensors.map((sensor) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [sensor.lng, sensor.lat] },
+      properties: { weight: Math.min(1, sensor.minuteCount / max) },
+    }));
+  }
+
+  const hourData = forecastForSelectedHour.value;
+  const sensors = hourData?.sensors ?? [];
+  const max = Math.max(...sensors.map((s) => s.predictedCountPerMinute), 1);
+  return sensors.map((sensor) => ({
+    type: "Feature",
+    geometry: { type: "Point", coordinates: [sensor.lng, sensor.lat] },
+    properties: { weight: Math.min(1, sensor.predictedCountPerMinute / max) },
+  }));
+}
+
+// The heatmap source/layer is created once (empty) the moment the map style
+// loads, right before anything else — Mapbox stacks new layers on top of
+// existing ones, so adding it first guarantees the route line and markers
+// always render above the heat, never underneath it.
+function ensureHeatmapLayer() {
+  if (!map || map.getSource("crowd-heat")) return;
+  map.addSource("crowd-heat", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({
+    id: "crowd-heatmap",
+    type: "heatmap",
+    source: "crowd-heat",
+    paint: {
+      "heatmap-weight": ["interpolate", ["linear"], ["get", "weight"], 0, 0, 1, 1],
+      "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 12, 0.8, 17, 2.4],
+      // Same low/medium/high palette as everything else in the app (sage
+      // green through amber to terracotta), fading in from transparent so
+      // sparse areas don't get a hard-edged blob.
+      "heatmap-color": [
+        "interpolate",
+        ["linear"],
+        ["heatmap-density"],
+        0, "rgba(47, 143, 111, 0)",
+        0.25, "rgba(47, 143, 111, 0.55)",
+        0.5, "rgba(169, 122, 31, 0.65)",
+        0.75, "rgba(184, 86, 61, 0.75)",
+        1, "rgba(184, 86, 61, 0.9)",
+      ],
+      "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 12, 16, 17, 36],
+      "heatmap-opacity": 0.8,
+    },
+  });
+}
+
+function renderCrowdHeatmap() {
+  if (!map || !mapReady.value) return;
+  ensureHeatmapLayer();
+  map.getSource("crowd-heat")?.setData({ type: "FeatureCollection", features: crowdHeatmapFeatures() });
+  map.setLayoutProperty("crowd-heatmap", "visibility", heatmapVisible.value ? "visible" : "none");
+}
+
+function toggleHeatmap() {
+  heatmapVisible.value = !heatmapVisible.value;
+  renderSensorMarkers();
+  renderCrowdHeatmap();
 }
 
 // Classic "blue dot" — distinct from the green route-start marker so it
@@ -357,13 +436,17 @@ async function loadMap() {
 async function loadPedestrianCounts() {
   pedestrianCounts.value = await getPedestrianCounts();
   renderSensorMarkers();
+  if (sensorViewMode.value === "live") renderCrowdHeatmap();
 }
 
 async function loadPedestrianForecast() {
   // Always fetched at the full 3-hour horizon — the 1h/2h/3h toggle just
   // switches which already-loaded hour's data is shown, no re-fetching.
   pedestrianForecast.value = await getPedestrianForecast();
-  if (sensorViewMode.value !== "live") renderSensorMarkers();
+  if (sensorViewMode.value !== "live") {
+    renderSensorMarkers();
+    renderCrowdHeatmap();
+  }
 }
 
 onMounted(() => {
@@ -374,6 +457,7 @@ onMounted(() => {
   initMap().then(() => {
     renderMapLayer();
     renderSensorMarkers();
+    renderCrowdHeatmap();
   });
   loadMap();
   loadPedestrianCounts();
@@ -385,7 +469,10 @@ onMounted(() => {
 });
 watch(() => route.query.route, loadMap);
 watch(showRefuges, renderMapLayer);
-watch(sensorViewMode, renderSensorMarkers);
+watch(sensorViewMode, () => {
+  renderSensorMarkers();
+  renderCrowdHeatmap();
+});
 
 onBeforeUnmount(() => {
   clearRefugeMarkers();
@@ -446,13 +533,24 @@ function reroute() {
           <div>
             <strong>{{ forecast.levelLabel }} expected in the next hour</strong>
             <p>{{ forecast.basis }}</p>
-            <p class="forecast-disclaimer">Estimate based on available pedestrian data — actual conditions may vary.</p>
+            <p class="forecast-disclaimer">Estimate based on available pedestrian data. Actual conditions may vary.</p>
           </div>
         </div>
       </div>
 
       <div class="map-area">
         <div ref="mapEl" class="map-canvas"></div>
+
+        <button
+          v-if="mapReady"
+          type="button"
+          class="heatmap-toggle"
+          :class="{ active: heatmapVisible }"
+          @click="toggleHeatmap"
+        >
+          <Icon name="trendingUp" :size="14" />
+          {{ heatmapVisible ? "Heatmap" : "Points" }}
+        </button>
 
         <div v-if="loading || !mapReady" class="map-loading">
           <span class="map-loading-dot"></span>
@@ -812,6 +910,31 @@ function reroute() {
   color: var(--color-text-muted);
   font-size: 13px;
   font-weight: 600;
+}
+
+.heatmap-toggle {
+  position: absolute;
+  z-index: 1;
+  bottom: 12px;
+  left: 12px;
+
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 9px 13px;
+
+  background: var(--color-surface);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.heatmap-toggle.active {
+  color: var(--color-primary-dark);
 }
 
 .map-loading {

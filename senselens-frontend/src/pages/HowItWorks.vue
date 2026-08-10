@@ -11,7 +11,7 @@ const factors = [
   {
     icon: "users",
     title: "Live crowd level",
-    body: "Pedestrian sensor counts near the route's actual walking path are compared against every other currently-reporting sensor, giving a percentile — not a guess.",
+    body: "Pedestrian sensor counts near the route's actual walking path are compared against every other currently-reporting sensor, giving a percentile, not a guess.",
   },
   {
     icon: "trendingUp",
@@ -21,7 +21,7 @@ const factors = [
   {
     icon: "map",
     title: "Sensor coverage",
-    body: "Melbourne's sensor network doesn't all report at once — typically 15–20 of the 134 sensors are live at any given time. A route with no sensor nearby is marked \"insufficient data\" rather than a made-up score.",
+    body: "Melbourne's sensor network doesn't all report at once, typically 15-20 of the 134 sensors are live at any given time. A route with no sensor nearby is marked \"insufficient data\" rather than a made-up score.",
   },
   {
     icon: "refuge",
@@ -33,7 +33,7 @@ const factors = [
 const levels = [
   { key: "low", label: "LOW SENSORY", body: "Lower measured or predicted crowd exposure along this route." },
   { key: "medium", label: "MEDIUM SENSORY", body: "Some sections with moderate pedestrian activity." },
-  { key: "high", label: "HIGH SENSORY", body: "Higher measured or predicted crowd exposure — an alternative may be calmer." },
+  { key: "high", label: "HIGH SENSORY", body: "Higher measured or predicted crowd exposure. An alternative may be calmer." },
 ];
 </script>
 
