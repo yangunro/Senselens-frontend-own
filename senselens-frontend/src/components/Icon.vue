@@ -29,6 +29,7 @@ const paths = {
   trendingUp: '<path d="M3 17 9 11 13 15 21 6"/><path d="M15 6h6v6"/>',
   coffee: '<path d="M5 9h11v6a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V9Z"/><path d="M16 10.5h1.5a2.5 2.5 0 0 1 0 5H16"/><line x1="8" y1="4" x2="8" y2="6.5"/><line x1="11" y1="4" x2="11" y2="6.5"/>',
   navigation: '<path d="M12 2 4.5 19.5 12 15.5 19.5 19.5 12 2Z"/>',
+  info: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.5" r="0.6" fill="currentColor" stroke="none"/>',
 };
 </script>
 

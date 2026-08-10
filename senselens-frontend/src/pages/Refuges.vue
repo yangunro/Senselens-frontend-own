@@ -162,6 +162,9 @@ import("../pages/Map.vue");
 
             <span class="refuge-type">{{ refuge.type }}</span>
             <p v-if="refuge.note">{{ refuge.note }}</p>
+            <p class="refuge-disclaimer">
+              Identified from City of Melbourne open data — check current access before relying on this location.
+            </p>
           </div>
         </button>
 
@@ -343,6 +346,12 @@ import("../pages/Map.vue");
   color: var(--color-text-muted);
   font-size: 12.5px;
   line-height: 1.55;
+}
+
+.refuge-body p.refuge-disclaimer {
+  color: var(--color-text-faint);
+  font-size: 11px;
+  font-style: italic;
 }
 
 @media (min-width: 768px) {
