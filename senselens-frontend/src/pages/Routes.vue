@@ -22,6 +22,16 @@ const destinationPoint = computed(() => {
   return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
 });
 
+// A user-specified starting point (Home's optional "starting point" field)
+// overrides live geolocation entirely — present only when that field wasn't
+// left blank.
+const customOriginLabel = computed(() => route.query.origin || "");
+const customOriginPoint = computed(() => {
+  const lat = Number(route.query.originLat);
+  const lng = Number(route.query.originLng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+});
+
 const routeOptions = ref([]);
 const selectedId = ref(null);
 const loading = ref(true);
@@ -62,21 +72,38 @@ async function loadRoutes() {
       if (sequence !== loadSequence) return;
     }
 
-    try {
-      origin = await getAccurateCurrentLocation();
-      if (sequence !== loadSequence) return;
-      locationAccuracy.value = Math.round(origin.accuracy);
-    } catch (err) {
-      if (sequence !== loadSequence) return;
-      // Real location isn't available (denied, unsupported, too
-      // inaccurate) — fall back to a fixed starting point rather than
-      // dead-ending here. The UI says so explicitly (see
-      // usingFallbackOrigin below) instead of quietly pretending this
-      // is the user's real location, and "try location again" is still
-      // offered.
-      locationError.value = err.message || "Unable to determine your current location.";
-      origin = FALLBACK_ORIGIN;
-      usingFallbackOrigin.value = true;
+    if (customOriginLabel.value) {
+      // User chose their own starting point on Home — use it instead of
+      // asking for live location at all.
+      origin = customOriginPoint.value;
+      if (!origin) {
+        try {
+          origin = await geocodeAddress(customOriginLabel.value);
+        } catch (err) {
+          if (sequence !== loadSequence) return;
+          routeError.value = err.message || `We couldn't find "${customOriginLabel.value}".`;
+          loading.value = false;
+          return;
+        }
+        if (sequence !== loadSequence) return;
+      }
+    } else {
+      try {
+        origin = await getAccurateCurrentLocation();
+        if (sequence !== loadSequence) return;
+        locationAccuracy.value = Math.round(origin.accuracy);
+      } catch (err) {
+        if (sequence !== loadSequence) return;
+        // Real location isn't available (denied, unsupported, too
+        // inaccurate) — fall back to a fixed starting point rather than
+        // dead-ending here. The UI says so explicitly (see
+        // usingFallbackOrigin below) instead of quietly pretending this
+        // is the user's real location, and "try location again" is still
+        // offered.
+        locationError.value = err.message || "Unable to determine your current location.";
+        origin = FALLBACK_ORIGIN;
+        usingFallbackOrigin.value = true;
+      }
     }
   }
 
@@ -101,7 +128,7 @@ onMounted(loadRoutes);
 // already cached by the time they tap "Start calm route" instead of making
 // them wait for it on the next page.
 import("../pages/Map.vue");
-watch(() => [destination.value, destinationPoint.value], loadRoutes);
+watch(() => [destination.value, destinationPoint.value, customOriginLabel.value, customOriginPoint.value], loadRoutes);
 
 function startCalmRoute() {
   router.push({ path: "/map", query: { route: selectedId.value } });
@@ -116,11 +143,13 @@ function startCalmRoute() {
       </button>
 
       <div>
-        <h1 v-if="usingFallbackOrigin">Flinders Street Station to {{ destination }}</h1>
+        <h1 v-if="customOriginLabel">{{ customOriginLabel }} to {{ destination }}</h1>
+        <h1 v-else-if="usingFallbackOrigin">Flinders Street Station to {{ destination }}</h1>
         <h1 v-else-if="API_BASE">Current location to {{ destination }}</h1>
         <h1 v-else>Southern Cross Station to {{ destination }}</h1>
 
         <p v-if="!API_BASE">Choose a route that matches your comfort level</p>
+        <p v-else-if="customOriginLabel">Using your chosen starting point</p>
         <p v-else-if="locationAccuracy">Location accuracy: ±{{ locationAccuracy }} m</p>
         <p v-else-if="usingFallbackOrigin">Using an approximate starting point</p>
         <p v-else-if="!routeError">Finding your precise starting location…</p>
