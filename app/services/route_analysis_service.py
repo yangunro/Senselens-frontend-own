@@ -329,6 +329,15 @@ def _percentile_score(value, reference_values):
     return 100
 
 
+def _ordinal(number):
+    # 1 -> 1st, 2 -> 2nd, 3 -> 3rd, 33 -> 33rd, 11/12/13 -> th, etc.
+    if 10 <= number % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix}"
+
+
 def _score_level(score):
     if score is None:
         return {
@@ -408,7 +417,7 @@ def analyse_route(
             "high": "Higher pedestrian activity",
         }[level["level"]]
         description = (
-            f"Crowd exposure is at approximately the {score}th "
+            f"Crowd exposure is at approximately the {_ordinal(score)} "
             "percentile of current reporting sensors."
         )
         factors = [{
