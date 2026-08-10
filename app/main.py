@@ -43,6 +43,7 @@ origins = [
         "FRONTEND_ORIGIN",
         (
             "https://senselens.onrender.com,"
+            "https://senselense-duk4.onrender.com,"
             "http://localhost:5173,"
             "http://127.0.0.1:5173"
         ),
