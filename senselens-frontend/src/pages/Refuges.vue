@@ -6,11 +6,32 @@ import Icon from "../components/Icon.vue";
 import SkeletonBlock from "../components/SkeletonBlock.vue";
 import SegmentedTabs from "../components/SegmentedTabs.vue";
 import { getRefuges } from "../services/refuges";
+import { getQuietSpaces } from "../services/map";
+import { getAccurateCurrentLocation } from "../services/geolocation";
+import { FALLBACK_ORIGIN } from "../services/routes";
+import { openExternalNavigation } from "../services/externalNavigation";
 
 const router = useRouter();
 const refuges = ref([]);
 const loading = ref(true);
 const filter = ref("all");
+
+const EARTH_RADIUS_M = 6_371_000;
+
+function distanceMetres(a, b) {
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
+}
+
+function formatDistance(metres) {
+  if (metres == null) return null;
+  return metres < 1000 ? `${Math.round(metres)} m` : `${(metres / 1000).toFixed(1)} km`;
+}
 
 // Refuges already have real coordinates — send the user straight to the map
 // with a route generated live from their current location, instead of
@@ -30,13 +51,69 @@ const filterOptions = [
   { value: "Park", label: "Parks" },
 ];
 
-const filteredRefuges = computed(() =>
-  filter.value === "all" ? refuges.value : refuges.value.filter((r) => r.type === filter.value)
-);
+const filteredRefuges = computed(() => {
+  const list =
+    filter.value === "all" ? refuges.value : refuges.value.filter((r) => r.type === filter.value);
+
+  // Refuges actually on the current route come first (nearest along the
+  // route first); everything else follows, nearest to the user first.
+  // Refuges with no distance info yet (location still resolving) sink to
+  // the end rather than jumping around once it arrives.
+  return [...list].sort((a, b) => {
+    if (a.onRoute !== b.onRoute) return a.onRoute ? -1 : 1;
+    if (a.onRoute && b.onRoute) return a.distanceFromRouteM - b.distanceFromRouteM;
+    if (a.distanceM == null) return 1;
+    if (b.distanceM == null) return -1;
+    return a.distanceM - b.distanceM;
+  });
+});
 
 onMounted(async () => {
   refuges.value = await getRefuges();
   loading.value = false;
+
+  // Distance from the user is a nice-to-have, not worth blocking the list
+  // on — fill it in once location resolves (or falls back) without making
+  // anyone wait for it.
+  (async () => {
+    let origin;
+    try {
+      origin = await getAccurateCurrentLocation();
+    } catch {
+      origin = FALLBACK_ORIGIN;
+    }
+    refuges.value = refuges.value.map((refuge) => ({
+      ...refuge,
+      distanceM: distanceMetres(origin, refuge),
+    }));
+  })();
+
+  // If a route is currently active (the user just planned one, or is on
+  // their way somewhere), flag whichever refuges actually sit along it —
+  // "on the way" is far more useful here than just "nearby".
+  let lastRouteId;
+  try {
+    lastRouteId = sessionStorage.getItem("lastRouteId");
+  } catch {
+    lastRouteId = null;
+  }
+
+  if (lastRouteId) {
+    try {
+      const onRoute = await getQuietSpaces(lastRouteId);
+      const onRouteById = new Map(onRoute.map((space) => [String(space.id), space]));
+
+      refuges.value = refuges.value.map((refuge) => {
+        const match = onRouteById.get(String(refuge.id));
+        return match
+          ? { ...refuge, onRoute: true, distanceFromRouteM: match.distanceFromRouteM }
+          : refuge;
+      });
+    } catch {
+      // No active route, or it's since expired/been cleared — refuges just
+      // show without the "on the way" flag, not worth surfacing an error for.
+    }
+  }
 });
 // Every refuge card jumps straight to /map — pre-download its chunk (which
 // includes the ~1.8MB Mapbox GL bundle) now instead of making the user wait
@@ -66,27 +143,38 @@ import("../pages/Map.vue");
     </div>
 
     <div v-else-if="filteredRefuges.length" class="refuge-list">
-      <button
-        v-for="refuge in filteredRefuges"
-        :key="refuge.id"
-        type="button"
-        class="refuge-card"
-        @click="navigateTo(refuge)"
-      >
-        <div class="refuge-icon">
-          <Icon :name="refuge.icon" :size="20" />
-        </div>
-
-        <div class="refuge-body">
-          <div class="refuge-top">
-            <h2>{{ refuge.name }}</h2>
-            <span v-if="refuge.distance" class="distance">{{ refuge.distance }}</span>
+      <div v-for="refuge in filteredRefuges" :key="refuge.id" class="refuge-card">
+        <button type="button" class="refuge-main" @click="navigateTo(refuge)">
+          <div class="refuge-icon">
+            <Icon :name="refuge.icon" :size="20" />
           </div>
 
-          <span class="refuge-type">{{ refuge.type }}</span>
-          <p v-if="refuge.note">{{ refuge.note }}</p>
-        </div>
-      </button>
+          <div class="refuge-body">
+            <div class="refuge-top">
+              <h2>{{ refuge.name }}</h2>
+              <span v-if="refuge.onRoute" class="distance on-route">
+                On the way · {{ formatDistance(refuge.distanceFromRouteM) }}
+              </span>
+              <span v-else-if="refuge.distanceM != null" class="distance">
+                {{ formatDistance(refuge.distanceM) }}
+              </span>
+            </div>
+
+            <span class="refuge-type">{{ refuge.type }}</span>
+            <p v-if="refuge.note">{{ refuge.note }}</p>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          class="directions-button"
+          aria-label="Get walking directions"
+          @click.stop="openExternalNavigation(refuge)"
+        >
+          <Icon name="navigation" :size="15" />
+          Directions
+        </button>
+      </div>
     </div>
 
     <p v-else class="empty-state">No refuges in this category yet.</p>
@@ -136,9 +224,7 @@ import("../pages/Map.vue");
 
 .refuge-card {
   display: flex;
-  gap: 13px;
-
-  padding: 16px;
+  flex-direction: column;
 
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -149,6 +235,33 @@ import("../pages/Map.vue");
 
 .refuge-card:hover {
   border-color: #cfe3da;
+}
+
+.refuge-main {
+  display: flex;
+  gap: 13px;
+
+  padding: 16px;
+  text-align: left;
+}
+
+.directions-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+
+  padding: 11px 16px;
+
+  border-top: 1px solid var(--color-border);
+
+  color: var(--color-primary);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.directions-button:hover {
+  background: var(--color-surface-muted);
 }
 
 .refuge-icon {
@@ -197,9 +310,19 @@ import("../pages/Map.vue");
 .distance {
   flex: 0 0 auto;
 
-  color: var(--color-primary);
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.distance.on-route {
+  padding: 3px 9px;
+
+  background: var(--color-primary-soft);
+  border-radius: var(--radius-pill);
+
+  color: var(--color-primary);
 }
 
 .refuge-type {
