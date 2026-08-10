@@ -1,1267 +1,667 @@
 # SenseLens
 
-## Overview
+**Sensory-aware walking navigation for the Melbourne CBD.**
 
-**SenseLens** is a sensory-aware navigation platform designed to support more comfortable walking experiences through Melbourne CBD.
+SenseLens plans walking routes that account for more than distance and time. It
+ranks candidate routes by real-time crowd exposure, flags active construction,
+reflects street lighting, surfaces nearby quiet/refuge spaces, and forecasts how
+busy an area is likely to be over the next few hours — so people who are
+sensitive to crowds, noise, and visual clutter can choose a calmer way through
+the city.
 
-Traditional navigation applications generally optimise routes based on distance and travel time. SenseLens aims to extend this by considering environmental and sensory conditions that may affect a person's walking experience.
-
-The platform is designed to combine:
-
-- Live pedestrian activity
-- Historical pedestrian activity
-- Construction and development activity
-- Street-light information
-- Quiet/refuge locations when available
-- User sensory preferences
-- Walking-route information
-
-The long-term goal is to recommend walking routes based not only on distance and duration, but also on the sensory preferences of the user.
-
-> **Current status:** The database, Supabase migration, ETL foundation, FastAPI backend, core REST APIs, and frontend API contracts have been implemented. Backend cloud deployment and frontend integration are currently in progress. Dynamic sensory-aware route generation and recommendation are the next major development phase.
+> Monash University · Industry Experience Onboarding Project · Team Beyond-KPI · 2026
 
 ---
 
-## System Architecture
+## Table of Contents
 
-The current high-level architecture is:
+1. [What it does](#what-it-does)
+2. [Live deployment](#live-deployment)
+3. [System architecture](#system-architecture)
+4. [Technology stack](#technology-stack)
+5. [Repository structure](#repository-structure)
+6. [How routing & sensory scoring works](#how-routing--sensory-scoring-works)
+7. [Backend API reference](#backend-api-reference)
+8. [Data model & database](#data-model--database)
+9. [ETL pipeline](#etl-pipeline)
+10. [Pedestrian forecast model](#pedestrian-forecast-model)
+11. [Frontend](#frontend)
+12. [Local development setup](#local-development-setup)
+13. [Environment variables](#environment-variables)
+14. [Cloud deployment](#cloud-deployment)
+15. [Testing](#testing)
+16. [Git & branching workflow](#git--branching-workflow)
+17. [Development principles](#development-principles)
+18. [Team](#team)
+
+---
+
+## What it does
+
+Given an origin and a destination in the Melbourne CBD, SenseLens:
+
+- **Generates multiple walking routes** and ranks them by a live **sensory
+  score** (crowd exposure relative to currently-reporting pedestrian sensors).
+- **Explains the trade-off** between routes in plain language
+  (e.g. _"3 min longer, significantly more crowded"_).
+- **Flags active construction** along each route, and — when the user opts in —
+  steers the recommendation toward routes that pass fewer construction sites.
+- **Reflects street lighting** along a route (_Well lit / Moderately lit /
+  Dimly lit_), from the City of Melbourne street-light lux dataset.
+- **Surfaces quiet/refuge spaces** (parks, libraries, quiet cafés) that lie on
+  the way, and lets the user navigate straight to one.
+- **Forecasts crowding** 1–3 hours ahead, per sensor, from a model trained on
+  ~1.23M historical hourly observations.
+- **Shows a live crowd heatmap** on the map, plus a per-sensor "now / 1h / 2h /
+  3h" toggle.
+- **Saves routes** for quick recall, and hands off to the phone's native maps
+  app for turn-by-turn with voice guidance.
+
+Everything is driven by **real data**. When a dataset can't support an answer
+(e.g. no sensor is near enough to score a route), the API returns an honest
+"insufficient data" state rather than a fabricated number.
+
+---
+
+## Live deployment
+
+| Layer | Platform | URL |
+|---|---|---|
+| Frontend (Vue) | Render (static site) | `https://senselens.onrender.com` and `https://senselense-duk4.onrender.com` |
+| Backend (FastAPI) | FastAPI Cloud | `https://senselense.fastapicloud.dev` |
+| Database | Supabase (PostgreSQL, Session Pooler) | private |
+
+API docs (Swagger) are served at `/docs` on the backend, and the OpenAPI spec at
+`/openapi.json`.
+
+---
+
+## System architecture
 
 ```text
-Melbourne Open Data
-        │
-        ▼
-   ETL Pipelines
-        │
-        ▼
-Supabase PostgreSQL
-        │
-        ▼
-  FastAPI Backend
-        │
-        ▼
-    Vue Frontend
+                 City of Melbourne Open Data  +  Transport Victoria GTFS-Realtime
+                                     │
+                                     ▼
+                     ETL pipelines (etl/*, scheduled via GitHub Actions)
+                                     │
+                                     ▼
+                       Supabase PostgreSQL (Session Pooler)
+                                     │
+                                     ▼
+   Mapbox Directions API  ─────►  FastAPI backend (app/*)  ◄─────  offline-trained
+   (walking geometry)              route generation +                forecast model
+                                   sensory scoring +                (scripts/, loaded
+                                   spatial matching                  at request time)
+                                     │
+                                     ▼
+                          REST API  (/routes, /refuges, …)
+                                     │
+                                     ▼
+                        Vue 3 frontend (senselens-frontend/)
+                          Render static site + Mapbox GL JS
 ```
 
-The production architecture is being configured as:
+**Data flow**
 
-```text
-City of Melbourne Open Data
-          │
-          ▼
-     ETL Pipelines
-          │
-          ▼
-Supabase PostgreSQL
-   Session Pooler
-          │
-          ▼
-     FastAPI Cloud
-          │
-          ▼
-     Vue Frontend
-        Render
-```
-
-### Data Flow
-
-1. Public datasets are retrieved from City of Melbourne data sources.
-2. ETL pipelines extract, validate, clean, standardise, and transform the data.
-3. Processed data is stored in PostgreSQL hosted on Supabase.
-4. FastAPI connects to the shared Supabase PostgreSQL database.
-5. REST API endpoints expose application data to the frontend.
-6. The Vue frontend consumes the APIs to build the SenseLens user experience.
-7. Future routing functionality will introduce candidate walking routes that can be evaluated against environmental and sensory data.
+1. Public datasets are pulled from City of Melbourne Open Data (and Transport
+   Victoria GTFS-Realtime) by the ETL pipelines.
+2. ETL validates, cleans, standardises, and UPSERTs into Supabase PostgreSQL.
+   GitHub Actions run the pipelines on schedules (see [ETL pipeline](#etl-pipeline)).
+3. The FastAPI backend reads the shared database and, on a route request, calls
+   the **Mapbox Directions API** to compute walking geometry, then scores and
+   ranks routes against the live sensor/construction/lighting/refuge data.
+4. The Vue frontend consumes the REST API and renders the interactive map,
+   route cards, refuge list, heatmap, and forecast toggles with **Mapbox GL JS**.
 
 ---
 
-## Technology Stack
+## Technology stack
 
-### Backend
+**Backend** — Python 3.13 · FastAPI · SQLAlchemy · Psycopg 3 · Pydantic ·
+Uvicorn · `requests` · `polyline` · `gtfs-realtime-bindings`
 
-- Python 3.13
-- FastAPI
-- SQLAlchemy
-- Psycopg
-- Pydantic
-- Uvicorn
+**Database** — PostgreSQL on Supabase, accessed through the Supabase Session
+Pooler.
 
-### Database
+**Routing / maps** — **Mapbox Directions API** (server-side, walking profile)
+for route geometry and turn-by-turn steps; **Mapbox GL JS** and **Mapbox
+Geocoding/Search** on the frontend for map rendering and address autocomplete.
 
-- PostgreSQL
-- Supabase
-- Supabase Session Pooler
+> Note: route *computation* moved from the Google Routes API to Mapbox
+> Directions. Mapbox is now the single mapping provider for both display and
+> routing. The frontend still deep-links to Google/Apple Maps for optional
+> native turn-by-turn hand-off — that needs no API key.
 
-### ETL
+**Machine learning** — per-sensor linear regression implemented in **pure
+Python** (least squares, standard-library `math` only — no NumPy or scikit-learn
+dependency). Trained offline and committed as a JSON artifact that the backend
+loads (and caches) at request time.
 
-- Python
-- Requests
-- City of Melbourne Open Data APIs
-- Incremental loading
-- Checkpoint-based synchronisation
-- UPSERT-based database loading
+**Frontend** — Vue 3 (`<script setup>`) · Vue Router · Vite · Mapbox GL JS.
 
-### Frontend
-
-- Vue
-- JavaScript
-- Mapbox for maps and address search
-- Google Routes API (server-side, called by the backend) for walking route generation
-
-### Cloud Infrastructure
-
-- **Render** — Vue frontend
-- **FastAPI Cloud** — backend deployment
-- **Supabase** — PostgreSQL database
+**Cloud** — Render (frontend static site) · FastAPI Cloud (backend) ·
+Supabase (database) · GitHub Actions (ETL scheduling).
 
 ---
 
-# Repository Structure
-
-The backend follows a router/service architecture.
+## Repository structure
 
 ```text
 SenseLens/
 │
-├── README.md
-├── requirements.txt
-├── .python-version
-├── .gitignore
+├── README.md                     # this file
+├── schema.sql                    # canonical PostgreSQL schema (ERD, 3NF)
+├── requirements.txt              # backend Python dependencies
+├── render.yaml                   # Render static-site config for the frontend
+├── .env.example                  # backend environment-variable template
+├── .python-version               # pins Python 3.13 for cloud builds
 │
-├── app/
-│   ├── main.py
-│   ├── database.py
-│   ├── models.py
+├── app/                          # FastAPI backend
+│   ├── main.py                   # app, CORS, routers, /, /health, /users
+│   ├── database.py               # SQLAlchemy engine + session (DATABASE_URL/DB_*)
+│   ├── models.py                 # SQLAlchemy ORM models
 │   │
-│   ├── routers/
-│   │   ├── cbd_status.py
-│   │   ├── preferences.py
-│   │   ├── refuges.py
-│   │   ├── routes.py
-│   │   └── saved_routes.py
+│   ├── routers/                  # HTTP layer (endpoints, validation)
+│   │   ├── cbd_status.py         # GET /cbd-status
+│   │   ├── preferences.py        # GET/POST /preferences
+│   │   ├── pedestrian.py         # GET /pedestrian-counts/latest, /pedestrian-forecasts
+│   │   ├── refuges.py            # GET /refuges
+│   │   ├── routes.py             # /routes and /routes/{id}/* family
+│   │   └── saved_routes.py       # GET/POST/DELETE /saved-routes
 │   │
-│   └── services/
-│       ├── cbd_status_service.py
-│       ├── preferences_service.py
-│       ├── refuges_service.py
-│       ├── routes_service.py
-│       └── saved_routes_service.py
+│   └── services/                 # business logic + SQL
+│       ├── mapbox_routes_service.py   # Mapbox Directions + alternative synthesis
+│       ├── routes_service.py          # route generation, scoring, sorting, caching
+│       ├── route_analysis_service.py  # geometry, sensor/construction/lighting/refuge matching, percentile scoring
+│       ├── dynamic_route_store.py     # in-memory LRU cache of generated routes
+│       ├── construction_service.py    # active development-site lookup
+│       ├── lighting_service.py        # street-light lux lookup by bounding box
+│       ├── refuges_service.py         # refuge-location lookup
+│       ├── pedestrian_service.py      # latest live sensor snapshot
+│       ├── forecast_service.py        # per-sensor crowd prediction (model at request time)
+│       ├── preferences_service.py     # user sensory preferences
+│       ├── cbd_status_service.py      # aggregate CBD activity snapshot
+│       └── saved_routes_service.py    # persist/list/delete saved routes
 │
-├── etl/
+├── etl/                          # ETL pipelines (City of Melbourne + Transit)
 │   ├── README.md
-│   ├── client.py
-│   ├── repository.py
-│   ├── validators.py
-│   └── ...
+│   ├── client.py                 # Open Data API client (ODS Explore v2.1)
+│   ├── transit_client.py         # Transport Victoria GTFS-Realtime client
+│   ├── repository.py             # UPSERT helpers into Supabase
+│   ├── validators.py             # validation / cleaning
+│   ├── geo.py, cbd_boundary.py   # CBD bounding-box helpers
+│   ├── initialize_checkpoint.py  # ETL checkpoint bootstrap
+│   ├── sync_sensor_locations.py  # SensorLocation
+│   ├── sync_pedestrian_live.py   # live PedestrianCount (every 15 min)
+│   ├── sync_pedestrian_history.py# PedestrianHourlyHistory (checkpointed)
+│   ├── sync_development.py        # DevelopmentSite_Status
+│   ├── sync_streetlights.py       # StreetLight_LuxLevel
+│   ├── sync_refuge.py             # RefugeLocation
+│   └── sync_transit_congestion.py# TransitCongestionSignal (every 5 min)
 │
-└── senselens-frontend/
-    └── ...
+├── scripts/                      # offline model training / validation
+│   ├── train_pedestrian_forecast.py
+│   └── validate_pedestrian_forecast.py
+│
+├── senselens_pipeline/           # standalone scoring/pipeline experiments
+│   ├── pipeline.py, scoring.py, database.py
+│
+├── migrations/                   # reviewed, hand-applied SQL migrations
+│   ├── 001_add_route_geometry.sql
+│   └── README.md
+│
+├── .github/workflows/            # scheduled ETL (GitHub Actions)
+│   ├── etl-live.yml              # */15 min  — live pedestrian counts
+│   ├── etl-transit.yml           # */5 min   — transit congestion
+│   ├── etl-daily.yml             # 03:00 UTC — history, development, streetlights
+│   └── etl-weekly.yml            # Mon 03:00 — sensor locations, refuges
+│
+├── tests/                        # pytest suite (backend)
+│   ├── test_routes_api.py
+│   ├── test_routes_service.py
+│   ├── test_route_analysis_service.py
+│   ├── test_mapbox_routes_service.py
+│   └── test_forecast_service.py
+│
+└── senselens-frontend/           # Vue 3 frontend (see “Frontend”)
+    ├── index.html
+    ├── package.json
+    ├── vite.config.js
+    ├── .env.example
+    └── src/
+        ├── main.js, App.vue, style.css
+        ├── router/index.js
+        ├── pages/            # Home, Routes, Map, Refuges, SavedRoutes, HowItWorks, Setting, NotFound
+        ├── components/       # BottomNav, Icon, PageShell, ProgressBar, SegmentedTabs, SkeletonBlock
+        ├── composables/      # usePreferences, useMapboxSearch
+        └── services/         # http, routes, map, refuges, preferences, geolocation,
+                              #   geocode, mapbox, polyline, routeProgress,
+                              #   externalNavigation, savedRoutes, home
 ```
-
-The repository structure may continue to evolve as frontend integration, routing, and production deployment are completed.
 
 ---
 
-# Backend Architecture
+## How routing & sensory scoring works
 
-The FastAPI backend follows a layered architecture:
+This is the core of the app. A request to `GET /routes?destination=…` with
+origin/destination coordinates flows through the following pipeline
+(`app/services/routes_service.py` orchestrates it):
+
+### 1. Route geometry — Mapbox + synthesised alternatives
+
+`mapbox_routes_service.get_mapbox_routes()` calls the Mapbox Directions API
+(walking profile). Mapbox's walking profile returns **only one route** even with
+`alternatives=true`, which would leave nothing to rank. So when fewer than three
+routes come back, the service **synthesises genuine alternatives**: it routes
+through waypoints offset perpendicular to the straight origin→destination line,
+nudging the path onto parallel streets. Because the CBD is a grid, these are
+real, walkable options — not invented geometry.
+
+- Variants are de-duplicated geometrically (symmetric average nearest-neighbour
+  distance) so near-identical paths don't appear twice.
+- A detour cap rejects any variant more than 1.8× the direct route's length.
+- The two offset requests run in parallel.
+
+### 2. Sensory (crowd) scoring — interpolated percentile
+
+`route_analysis_service.analyse_route()` decodes each route's polyline and:
+
+- Finds live pedestrian sensors within ~150 m of the path.
+- Computes a distance-weighted average of their per-minute counts.
+- Converts that to a **percentile against all currently-reporting sensors**,
+  using **linear interpolation** across the empirical distribution. (A plain
+  step-rank collapses genuinely different routes to the same number when only a
+  handful of sensors are reporting a lumpy distribution; interpolation keeps
+  distinct routes distinct.)
+
+Percentile → level:
+
+| Score | Level |
+|---|---|
+| `< 35` | LOW SENSORY |
+| `35 – 64` | MEDIUM SENSORY |
+| `≥ 65` | HIGH SENSORY |
+| `None` (no nearby sensor) | INSUFFICIENT DATA |
+
+### 3. Construction & lighting factors
+
+- **Construction** — `construction_service` returns active
+  (`Under Construction`) development sites; routes within ~75 m of one are
+  flagged with a count.
+- **Lighting** — `lighting_service` fetches street-lights in the route's
+  bounding box (one query covering all alternatives); the average lux along the
+  path yields a comfort label: `< 10` Dimly lit, `< 30` Moderately lit, else
+  Well lit. (Bands are calibrated to Melbourne's own lux distribution.)
+
+### 4. Refuge (quiet-space) matching
+
+`route_analysis_service.refuges_near_route()` matches curated refuge locations
+(parks, libraries, quiet cafés) that lie within the corridor of a route, powering
+`/routes/{id}/quiet-spaces` and the "on the way" badges in the app.
+
+### 5. Ranking
+
+Routes are sorted by an effective score. When the user has **Avoid construction
+zones** enabled, each construction site a route passes adds a proportional
+penalty (8 points/site) to its ranking score — nudging the recommendation toward
+routes with fewer sites without letting one site override a much calmer path.
+Insufficient-data routes always sink below scored routes. The recommended card
+explains *why* it was chosen ("Lowest measured crowd exposure" / "Fewer
+construction zones" / "Avoids active construction").
+
+### 6. Caching & follow-ups
+
+Generated routes are held in a 100-entry in-memory LRU cache
+(`dynamic_route_store`). The follow-up endpoints (`/routes/{id}`,
+`/routes/{id}/alerts`, `/routes/{id}/forecast`, `/routes/{id}/quiet-spaces`) read
+from that cache, so the polyline, steps, and scoring don't need recomputation.
+Saving a route persists a real `Route` row first (so the `SavedRoute` foreign key
+is valid), since live routes otherwise exist only in the cache.
+
+---
+
+## Backend API reference
+
+Base URL (production): `https://senselense.fastapicloud.dev`
+
+### System & users
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/` | API name / version / status |
+| `GET` | `/health` | Health check |
+| `GET` | `/users` | List users |
+| `POST` | `/users` | Create a user (`Email`, `DisplayName`, `AuthProvider`) |
+
+### Preferences, CBD status, pedestrian data
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/preferences` | Sensory preferences (sliders + toggles) |
+| `POST` | `/preferences` | Save/update sensory preferences |
+| `GET` | `/cbd-status` | Aggregate current CBD activity snapshot |
+| `GET` | `/pedestrian-counts/latest` | Latest live per-sensor readings + coordinates |
+| `GET` | `/pedestrian-forecasts?horizonHours=3` | Map-wide per-sensor crowd predictions (1–3 h) |
+
+### Refuges & saved routes
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/refuges` | All refuge locations |
+| `GET` | `/saved-routes` | List saved routes |
+| `POST` | `/saved-routes` | Save a route (`routeId`, `label`) |
+| `DELETE` | `/saved-routes/{saved_route_id}` | Delete a saved route |
+
+### Routes
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/routes` | Stored routes (no destination) |
+| `GET` | `/routes?destination=…&originLat=…&originLng=…` | **Generate live scored walking routes** |
+| `GET` | `/routes/{route_id}` | Full route detail (polyline, steps, factors) |
+| `GET` | `/routes/{route_id}/alerts` | Alerts for a route (high crowd / construction) |
+| `GET` | `/routes/{route_id}/forecast` | Next 1–3 h crowd forecast for the route |
+| `GET` | `/routes/{route_id}/quiet-spaces` | Refuge spaces on/near the route |
+
+**Route generation query parameters**
+
+| Param | Alias | Notes |
+|---|---|---|
+| `destination` | | Free-text label (required to generate) |
+| `originLat`, `originLng` | | Required when generating — the browser's current location or a chosen start |
+| `destinationLat`, `destinationLng` | | Optional but recommended; must be supplied together |
+| `avoidConstruction` | | `true` to weight construction into ranking |
+
+Example:
 
 ```text
-HTTP Request
-      │
-      ▼
-FastAPI Router
-      │
-      ▼
-Service Layer
-      │
-      ▼
-SQLAlchemy / SQL
-      │
-      ▼
-Supabase PostgreSQL
+GET /routes?destination=Queen%20Victoria%20Market&originLat=-37.8183&originLng=144.9671&destinationLat=-37.8076&destinationLng=144.9568&avoidConstruction=true
 ```
 
-## Routers
+Each returned route includes: `id`, `tag`, `name`, `level`, `levelLabel`,
+`sensoryScore`, `duration`/`durationMinutes`, `description`, `footnote`,
+`recommended`, `hasActiveConstruction`, `constructionSitesNearby`, `averageLux`,
+`lightingComfort`, and a `factors[]` list (crowd / construction / lighting chips).
 
-Routers are responsible for:
+**Honest empty / unavailable states**
 
-- Defining HTTP endpoints
-- Receiving requests
-- Validating parameters
-- Calling service functions
-- Returning API responses
-- Returning appropriate HTTP status codes
-
-## Services
-
-Services are responsible for:
-
-- Business logic
-- Database queries
-- Data transformation
-- Preparing frontend-friendly responses
-
-This keeps HTTP handling separate from database and application logic.
+- `/routes`, `/refuges`, `/saved-routes` may return `[]` when the relevant data
+  legitimately has nothing to report.
+- `/routes/{id}/forecast` returns `404` when no forecast applies, and `503` if
+  the model artifact is missing/incompatible.
+- A route with no nearby sensor returns `sensoryScore: null` and
+  `INSUFFICIENT DATA` rather than a made-up score.
 
 ---
 
-# Current Backend APIs
+## Data model & database
 
-## System
+PostgreSQL on Supabase. The canonical schema is [`schema.sql`](schema.sql),
+normalised to 3NF, with PascalCase, double-quoted identifiers mirroring the
+project ERD. Keep quoting consistent in all queries.
 
-| Method | Endpoint | Purpose | Status |
-|---|---|---|---|
-| GET | `/` | API information/status | Implemented |
-| GET | `/health` | Backend health check | Implemented |
+The schema is organised into four zones:
 
----
+- **Zone 1 — App-native:** `User`, `UserPreference`, `SavedRoute`
+- **Zone 2 — Route & computed score:** `Route`, `SensoryScore`
+- **Zone 3 — Sensor network:** `SensorLocation`, `PedestrianCount`,
+  `RouteSensor`, `TransitCongestionSignal`
+- **Zone 4 — Spatial context (radius-joined at query time, no FK to Route):**
+  `RefugeLocation`, `DevelopmentSite_Status`, `StreetLight_LuxLevel`
 
-## Users
+In addition to the ERD tables, the live database holds
+`PedestrianHourlyHistory` (the historical training corpus) and an
+`ETLCheckpoint` table used for incremental loading.
 
-| Method | Endpoint | Purpose | Status |
-|---|---|---|---|
-| GET | `/users` | Retrieve users | Implemented |
-| POST | `/users` | Create a user | Implemented |
-| GET | `/preferences` | Retrieve sensory preferences | Implemented |
-| POST | `/preferences` | Save/update sensory preferences | Implemented |
-| GET | `/cbd-status` | Retrieve current CBD activity status | Implemented |
-| GET | `/pedestrian-counts/latest` | Retrieve the latest sensor readings and coordinates | Implemented |
-| GET | `/pedestrian-forecasts?horizonHours=3` | Retrieve map-wide per-sensor crowd predictions | Implemented |
-| GET | `/refuges` | Retrieve refuge locations | Implemented |
-| GET | `/saved-routes` | Retrieve saved routes | Implemented |
-| POST | `/saved-routes` | Save a route | Implemented |
-| DELETE | `/saved-routes/{saved_route_id}` | Delete a saved route | Implemented |
-| GET | `/routes` | Retrieve available stored routes | Implemented |
-| GET | `/routes?destination=...` | Generate live Google walking routes | Implemented |
-| GET | `/routes/{route_id}` | Retrieve a specific route | Implemented |
-| GET | `/routes/{route_id}/alerts` | Retrieve alerts associated with a route | Implemented |
-| GET | `/routes/{route_id}/forecast` | Retrieve the latest sensory forecast | Implemented |
-| GET | `/routes/{route_id}/quiet-spaces` | Retrieve quiet spaces for a route | Contract implemented |
+**Approximate live data volumes** (feeds refresh on schedule, so these drift):
 
-### Empty API Responses
+| Table | Rows | Source |
+|---|---:|---|
+| `PedestrianHourlyHistory` | ~1,225,000 | City of Melbourne — historical pedestrian counts |
+| `StreetLight_LuxLevel` | 12,378 | City of Melbourne — street-light lux |
+| `DevelopmentSite_Status` | 1,169 | City of Melbourne — development activity |
+| `RefugeLocation` | 740 | Curated from CoM parks/libraries/community datasets |
+| `SensorLocation` | 134 | City of Melbourne — pedestrian sensor locations |
+| `PedestrianCount` | ~640 | City of Melbourne — live per-sensor counts |
 
-Some endpoints currently return empty arrays:
-
-```json
-[]
-```
-
-This is expected.
-
-For example:
-
-- `/refuges`
-- `/saved-routes`
-- `/routes` without a destination
-
-may return empty arrays because the corresponding tables have not yet been populated.
-
-The API endpoints have been implemented so the frontend contract is available before the routing and refuge-data pipelines are completed.
-
-No artificial refuge or route data is generated simply to populate these endpoints.
-
-Dynamic route generation requires the browser's current origin coordinates:
-
-```text
-GET /routes?destination=Melbourne%20Central&originLat=-37.8136&originLng=144.9631
-```
-
-The Vue client requests high-accuracy browser geolocation, rejects readings
-worse than 200 metres, and displays the live location and reported accuracy
-on the route map. Production geolocation requires HTTPS; localhost is allowed
-for development.
-
-The destination field uses Google `PlaceAutocompleteElement`. The browser key
-must have both Maps JavaScript API and Places API (New) enabled, and should be
-restricted to the application's local and production HTTP referrers. Selected
-suggestions provide `destinationLat` and `destinationLng`, so Google Routes
-can use the exact place rather than geocoding an ambiguous text value.
+**Connectivity** — the backend connects through the **Supabase Session Pooler**
+(the direct database host was not reliably reachable from all environments).
+Configure with either `DATABASE_URL` or the `DB_*` variables (see
+[Environment variables](#environment-variables)).
 
 ---
 
-## User Preferences
+## ETL pipeline
 
-| Method | Endpoint | Purpose | Status |
-|---|---|---|---|
-| GET | `/preferences` | Retrieve sensory preferences | Implemented |
-| POST | `/preferences` | Save/update sensory preferences | Implemented |
+Each pipeline extracts from an open-data source, validates and cleans, then
+UPSERTs into Supabase (idempotent, duplicate-safe). Historical pedestrian
+loading is **checkpoint-based**: `ETLCheckpoint` records the last loaded date, so
+only missing dates are fetched rather than re-downloading the full corpus.
+
+Pipelines are scheduled with **GitHub Actions** (each also supports manual
+`workflow_dispatch`):
+
+| Workflow | Schedule (UTC) | Runs |
+|---|---|---|
+| `etl-live.yml` | every 15 min | `sync_pedestrian_live` |
+| `etl-transit.yml` | every 5 min | `sync_transit_congestion` |
+| `etl-daily.yml` | daily 03:00 | `sync_pedestrian_history`, `sync_development`, `sync_streetlights` |
+| `etl-weekly.yml` | Mon 03:00 | `sync_sensor_locations`, `sync_refuge` |
+
+Run any pipeline manually:
+
+```bash
+python -m etl.sync_pedestrian_live
+python -m etl.sync_development
+python -m etl.sync_refuge
+```
+
+See [`etl/README.md`](etl/README.md) for pipeline-specific detail.
+
+> **Known external blocker:** `sync_transit_congestion` needs a Transport
+> Victoria GTFS-Realtime *Subscription Key*. The data-platform token type issued
+> so far is not the correct credential, so `TransitCongestionSignal` is not yet
+> populated. The pipeline and schema are ready for it.
 
 ---
 
-## CBD Status
+## Pedestrian forecast model
 
-| Method | Endpoint | Purpose | Status |
-|---|---|---|---|
-| GET | `/cbd-status` | Retrieve current CBD sensory/activity information | Implemented |
+`/routes/{id}/forecast` and `/pedestrian-forecasts` are backed by a **per-sensor
+linear regression**, implemented in pure Python (least squares, no external ML
+library), trained offline from `PedestrianHourlyHistory` (~1.23M hourly
+observations, 2025-01-01 → 2026-08-09). Features: time trend, hour-of-day,
+day-of-week, weekend flag. Sensors without enough history fall back to a global
+regression. The model is stored as a committed **JSON artifact** that FastAPI
+loads (and caches via `lru_cache`) — the API never retrains per request.
 
----
+Rounded prediction bands: **Low 0–5**, **Medium 6–14**, **High 15+** pedestrians
+per minute.
 
-## Refuge Locations
+Retrain after refreshing history:
 
-| Method | Endpoint | Purpose | Status |
-|---|---|---|---|
-| GET | `/refuges` | Retrieve available refuge locations | Implemented |
-
-The endpoint is ready, but the `RefugeLocation` table is not currently populated with verified refuge data.
-
-The backend does **not fabricate refuge locations**.
-
----
-
-## Routes
-
-| Method | Endpoint | Purpose | Status |
-|---|---|---|---|
-| GET | `/routes` | Retrieve stored routes | Implemented |
-| GET | `/routes/{route_id}` | Retrieve a specific route | Implemented |
-| GET | `/routes/{route_id}/alerts` | Retrieve route alerts | Implemented |
-| GET | `/routes/{route_id}/forecast` | Retrieve 1-3 hour route crowd predictions | Implemented |
-| GET | `/routes/{route_id}/quiet-spaces` | Retrieve quiet/refuge spaces associated with a route | API contract implemented |
-
-### Route Forecast
-
-The endpoint:
-
-```text
-GET /routes/{route_id}/forecast
-```
-
-returns per-sensor pedestrian predictions for the next 1, 2, and 3 hours.
-The model is a per-sensor linear regression trained offline from
-`PedestrianHourlyHistory`; the committed artifact is loaded by FastAPI at
-request time, so the API does not retrain the model for every request.
-
-The current artifact was trained from 1,225,895 hourly observations covering
-2025-01-01 through 2026-08-09. It predicts pedestrians per minute from time
-trend, hour-of-day, day-of-week, and weekend features. Sensors without enough
-history use the global fallback regression.
-
-The response preserves the fields consumed by the Map page and also provides
-detailed forecasts and alerts:
-
-```json
-{
-  "routeId": "...",
-  "sensoryIndicator": "HIGH SENSORY",
-  "level": "high",
-  "basis": "...",
-  "horizonHours": 3,
-  "hasPredictiveAlert": true,
-  "forecasts": [
-    {
-      "hoursAhead": 1,
-      "forecastAt": "...",
-      "maximumPredictedCountPerMinute": 21,
-      "sensors": []
-    }
-  ],
-  "alerts": []
-}
-```
-
-The rounded prediction bands are Low 0-5, Medium 6-14, and High 15+.
-For map-wide prediction markers, use:
-
-```text
-GET /pedestrian-forecasts?horizonHours=3
-```
-
-If no sensory/forecast information is available, the API returns:
-
-```json
-{
-  "detail": "Forecast data not available for this route"
-}
-```
-
-with:
-
-```text
-HTTP 404
-```
-
-If the model artifact is absent or incompatible, the API returns HTTP 503.
-Retrain it after refreshing historical data with:
-
-```text
+```bash
 python -m scripts.train_pedestrian_forecast
+python -m scripts.validate_pedestrian_forecast
 ```
+
+If the artifact is absent or incompatible, forecast endpoints return `503`.
 
 ---
 
-## Route Quiet Spaces
+## Frontend
 
-The endpoint:
+Vue 3 (`<script setup>`) + Vue Router + Vite, rendered with Mapbox GL JS.
+Deployed as a Render static site.
 
-```text
-GET /routes/{route_id}/quiet-spaces
-```
+**Pages** (`src/pages/`)
 
-is implemented.
+| Route | Page | Purpose |
+|---|---|---|
+| `/` | `Home.vue` | Destination + optional origin search (Mapbox autocomplete) |
+| `/routes` | `Routes.vue` | Ranked route cards with sensory badge, factors, trade-off notes |
+| `/map` | `Map.vue` | Interactive map: route line, sensor markers, crowd heatmap, forecast toggle, live progress, save/navigate |
+| `/refuges` | `Refuges.vue` | Nearby refuges, "on the way" badges, one-tap navigate |
+| `/saved-routes` | `SavedRoutes.vue` | Saved routes (tap re-generates a fresh live route) |
+| `/how-it-works` | `HowItWorks.vue` | Honest explanation of what the score does and doesn't use |
+| `/settings` | `Setting.vue` | Preferences (placeholder) |
+| `*` | `NotFound.vue` | 404 |
 
-At the current development stage it may return:
+**Services** (`src/services/`) wrap the backend API with a mock fallback:
+`withApiFallback()` tries the real backend when `VITE_API_BASE` is set and only
+falls back to mock data when it isn't — so a real outage surfaces as an error
+state, never as fake data. Key modules: `routes.js`, `map.js`, `refuges.js`,
+`preferences.js`, `savedRoutes.js`, `geolocation.js`, `geocode.js`,
+`routeProgress.js` (foreground turn-by-turn estimation),
+`externalNavigation.js` (native maps hand-off), `mapbox.js`, `polyline.js`.
 
-```json
-[]
-```
+**State** — a shared reactive `usePreferences` composable keeps sensory
+preferences consistent app-wide; cross-page route context (e.g. the active route
+for "on the way" refuge detection) is passed via `sessionStorage`.
 
-This is intentional because:
-
-- `RefugeLocation` has not yet been populated with verified refuge data.
-- Route-to-refuge spatial matching has not yet been implemented.
-
-SenseLens does not fabricate quiet-space matches simply to populate the response.
-
-Once refuge data and route geometry are available, this endpoint can identify suitable spaces near a candidate walking route.
-
----
-
-# Saved Routes
-
-The Saved Routes API now supports the basic create/read/delete lifecycle.
-
-| Method | Endpoint | Purpose | Status |
-|---|---|---|---|
-| GET | `/saved-routes` | Retrieve saved routes | Implemented |
-| POST | `/saved-routes` | Save a route | Implemented |
-| DELETE | `/saved-routes/{saved_route_id}` | Delete a saved route | Implemented |
-
-## Saving a Route
-
-Example:
-
-```text
-POST /saved-routes
-```
-
-Request:
-
-```json
-{
-  "routeId": "ROUTE_UUID",
-  "label": "Home to Campus"
-}
-```
-
-The `RouteID` must correspond to a valid route in the database.
-
-If a nonexistent route is supplied, the database foreign-key relationship prevents an invalid saved route from being created and the API returns:
-
-```json
-{
-  "detail": "Route not found"
-}
-```
-
-with HTTP `404`.
+**Theme** — a single light theme, pinned with `color-scheme: light` so browsers
+with "auto dark mode for web content" don't recolor the UI.
 
 ---
 
-## Deleting a Saved Route
+## Local development setup
 
-Example:
-
-```text
-DELETE /saved-routes/{saved_route_id}
-```
-
-If the saved route exists, it is removed from the database.
-
-If it does not exist, the API returns:
-
-```json
-{
-  "detail": "Saved route not found"
-}
-```
-
-with HTTP `404`.
-
----
-
-# Empty API Responses
-
-Some endpoints may currently return:
-
-```json
-[]
-```
-
-This does not necessarily indicate an API failure.
-
-For example:
-
-```text
-GET /routes
-GET /refuges
-GET /saved-routes
-GET /routes/{route_id}/quiet-spaces
-```
-
-can legitimately return empty arrays while their underlying database tables contain no applicable records.
-
-The backend returns the actual database state rather than artificial demonstration data.
-
----
-
-# User Preferences
-
-SenseLens currently supports sensory preferences that can later influence route recommendations.
-
-## Sensitivity Controls
-
-```text
-Crowd sensitivity
-Noise sensitivity
-Light sensitivity
-```
-
-The frontend represents sensitivity using:
-
-```text
-0 = Low
-1 = Medium
-2 = High
-```
-
-Noise and light sensitivity are mapped to the corresponding database representation.
-
-## Preference Toggles
-
-Current toggles include:
-
-- Avoid construction zones
-- Show refuge spaces
-- High contrast mode
-
-Preferences can be retrieved with:
-
-```text
-GET /preferences
-```
-
-and updated with:
-
-```text
-POST /preferences
-```
-
----
-
-# Database
-
-SenseLens uses PostgreSQL hosted on **Supabase**.
-
-The database was originally developed locally and subsequently migrated to the shared Supabase environment so all application services can use the same database.
-
-## Main Database Areas
-
-The database supports:
-
-- Users
-- User preferences
-- Pedestrian sensors
-- Current pedestrian counts
-- Historical pedestrian counts
-- Development/construction activity
-- Street-light information
-- Routes
-- Route-to-sensor relationships
-- Saved routes
-- Sensory scores
-- Refuge locations
-- Transit congestion signals
-- ETL checkpoints
-
-Example tables include:
-
-```text
-User
-UserPreference
-SensorLocation
-PedestrianCount
-PedestrianHourlyHistory
-DevelopmentSite_Status
-StreetLight_LuxLevel
-Route
-RouteSensor
-SavedRoute
-SensoryScore
-RefugeLocation
-TransitCongestionSignal
-ETLCheckpoint
-```
-
----
-
-# Supabase Database Connectivity
-
-The backend now uses the **Supabase Session Pooler** for PostgreSQL connectivity.
-
-This was selected because the direct Supabase database hostname was not reliably reachable from the local development environment.
-
-The application uses environment variables:
-
-```env
-DB_USER=postgres.<PROJECT_REF>
-DB_PASSWORD=<YOUR_DATABASE_PASSWORD>
-DB_HOST=<SUPABASE_SESSION_POOLER_HOST>
-DB_PORT=5432
-DB_NAME=postgres
-```
-
-Real credentials must never be committed to Git.
-
-The database connection is constructed in the backend using these environment variables.
-
-The Session Pooler connection has been successfully tested from the local development environment.
-
----
-
-# ETL Pipeline
-
-The ETL layer retrieves and prepares environmental information used by SenseLens.
-
-The general process is:
-
-```text
-City of Melbourne API
-        │
-        ▼
-      Extract
-        │
-        ▼
-Validate / Clean
-        │
-        ▼
-   Standardise
-        │
-        ▼
-    Transform
-        │
-        ▼
-      UPSERT
-        │
-        ▼
-Supabase PostgreSQL
-```
-
-## Implemented ETL Features
-
-The ETL framework includes:
-
-- API extraction
-- Pagination
-- Data transformation
-- Validation
-- Missing-value checks
-- Non-negative pedestrian-count validation
-- Standardised field mappings
-- UPSERT operations
-- Duplicate protection
-- Incremental loading
-- Historical loading
-- ETL checkpoints
-- Error handling
-- Pedestrian-data ingestion
-- Development/construction-data ingestion
-
----
-
-# Historical Pedestrian Loading
-
-Historical pedestrian data uses checkpoint-based incremental loading.
-
-```text
-ETLCheckpoint
-      │
-      ▼
-Last Successfully Loaded Date
-      │
-      ▼
-Determine Missing Dates
-      │
-      ▼
-City of Melbourne API
-      │
-      ▼
-Validate + Transform
-      │
-      ▼
-UPSERT
-      │
-      ▼
-Update Checkpoint
-```
-
-This avoids repeatedly downloading the complete historical dataset.
-
----
-
-# Remaining ETL Work
-
-The ETL framework is mostly complete, but production automation is still pending.
-
-Remaining work includes:
-
-- Automated ETL scheduling
-- Production job execution
-- Additional retry handling
-- Remaining data-source completion
-- Street-light pipeline completion where required
-- Production monitoring
-- Improved logging
-
-The ETL should therefore not yet be considered fully automated.
-
----
-
-# Local Backend Setup
-
-## 1. Clone the repository
+### Backend
 
 ```bash
 git clone <repository-url>
 cd SenseLens
-```
 
----
-
-## 2. Create a virtual environment
-
-```bash
 python -m venv .venv
-```
+source .venv/bin/activate          # macOS/Linux
 
-Activate it on macOS/Linux:
-
-```bash
-source .venv/bin/activate
-```
-
----
-
-## 3. Install Dependencies
-
-```bash
 pip install -r requirements.txt
-```
 
-The project uses a minimal cloud-compatible dependency list:
-
-```text
-fastapi[standard]
-SQLAlchemy
-psycopg[binary]
-python-dotenv
-requests
-```
-
-The dependency file intentionally avoids packages exported from an entire local Conda environment.
-
----
-
-# Python Version
-
-The cloud deployment uses Python 3.13.
-
-The repository contains:
-
-```text
-.python-version
-```
-
-with:
-
-```text
-3.13
-```
-
-This prevents the cloud build environment from unexpectedly selecting a newer Python version that may not yet be compatible with every dependency.
-
----
-
-# Environment Variables
-
-Create a `.env` file locally:
-
-```env
-DATABASE_URL=YOUR_SUPABASE_POSTGRESQL_CONNECTION_URL
-GOOGLE_ROUTES_API_KEY=YOUR_SERVER_SIDE_GOOGLE_ROUTES_KEY
-FRONTEND_ORIGIN=http://localhost:5173,https://senselens.onrender.com
-DB_USER=postgres.<PROJECT_REF>
-DB_PASSWORD=<YOUR_DATABASE_PASSWORD>
-DB_HOST=<SUPABASE_SESSION_POOLER_HOST>
-DB_PORT=5432
-DB_NAME=postgres
-```
-
-Use either `DATABASE_URL` or the five `DB_*` settings. Never commit `.env` to Git.
-
-Production environment variables should be configured through the cloud hosting platform.
-
----
-
-# Running the Backend Locally
-
-Run:
-
-```bash
+cp .env.example .env               # then fill in real values
 fastapi dev app/main.py
 ```
 
-The development server should start at:
+- API: `http://127.0.0.1:8000`
+- Swagger: `http://127.0.0.1:8000/docs`
+- OpenAPI: `http://127.0.0.1:8000/openapi.json`
 
-```text
-http://127.0.0.1:8000
-```
+Python is pinned to **3.13** via `.python-version` so cloud builds don't pick a
+newer, possibly-incompatible interpreter.
 
-Swagger documentation:
+### Frontend
 
-```text
-http://127.0.0.1:8000/docs
-```
+```bash
+cd senselens-frontend
+npm install
 
-OpenAPI specification:
-
-```text
-http://127.0.0.1:8000/openapi.json
-```
-
----
-
-# CORS Configuration
-
-The FastAPI backend uses `CORSMiddleware` so the Vue application can access the API from a different origin.
-
-The currently allowed frontend origins are:
-
-```text
-https://senselens.onrender.com
-
-http://localhost:5173
-
-http://127.0.0.1:5173
-```
-
-This supports both:
-
-- The deployed Vue frontend
-- Local Vue development
-
-The production frontend URL is:
-
-```text
-https://senselens.onrender.com
+cp .env.example .env               # set VITE_API_BASE + VITE_MAPBOX_ACCESS_TOKEN
+npm run dev                        # http://localhost:5173
+npm run build                      # production build → dist/
 ```
 
 ---
 
-# Cloud Deployment
+## Environment variables
 
-## Frontend
+### Backend (`.env`, or the cloud platform's secrets)
 
-The Vue frontend deploys from this repository's `senselens-frontend/` directory
-on `main` — consolidated here from the `wenlu` branch (2026-08-10), which was
-the actively-maintained implementation. A `render.yaml` at the repo root
-declares the Render static site config (build command, publish path, SPA
-routing rewrite, required env vars) so the deploy is reproducible by anyone
-on the team, not tied to one person's account or a personal fork.
-
-Required environment variables (set as secrets in Render, not committed):
-
-```text
-VITE_API_BASE               # FastAPI Cloud backend URL, no trailing slash
-VITE_MAPBOX_ACCESS_TOKEN    # from account.mapbox.com/access-tokens/
-```
-
-The frontend uses Mapbox (not Google Maps) for maps and address search.
-
-## Backend
-
-The FastAPI backend is connected to **FastAPI Cloud** through the project's GitHub repository.
-
-The intended production flow is:
-
-```text
-Vue Frontend
-   Render
-      │
-      ▼
-FastAPI Backend
- FastAPI Cloud
-      │
-      ▼
-Supabase Session Pooler
-      │
-      ▼
-PostgreSQL
-```
-
-The latest backend deployment should be verified in FastAPI Cloud after changes are pushed to `main`.
-
-Backend cloud deployment should not be considered complete until:
-
-- The latest build succeeds
-- `/health` responds publicly
-- `/docs` loads publicly
-- Supabase connectivity works from FastAPI Cloud
-- The Render frontend can access the backend without CORS errors
-
----
-
-# FastAPI Cloud Environment
-
-The FastAPI Cloud environment must contain the same database configuration required by the application.
-
-Example:
-
-```text
-DB_USER
-DB_PASSWORD
-DB_HOST
-DB_PORT
-DB_NAME
-```
-
-The production values should use the Supabase Session Pooler.
-
-Local `.env` changes do **not** automatically update FastAPI Cloud environment variables.
-
-Secrets must be configured using the cloud platform's environment/secrets functionality.
-
----
-
-# Recent Backend Update
-
-The latest backend development checkpoint includes:
-
-- Route forecast API contract completed
-- Route quiet-spaces API contract completed
-- Saved-route creation API completed
-- Saved-route deletion API completed
-- Supabase Session Pooler connectivity tested locally
-- Frontend CORS configuration added
-- Local Swagger/OpenAPI testing completed
-- Changes pushed to the `main` branch
-
-Latest backend checkpoint commit:
-
-```text
-7bc19c2
-```
-
----
-
-# Current Project Status
-
-| Component | Status |
+| Variable | Purpose |
 |---|---|
-| Database design | Complete |
-| Supabase migration | Complete |
-| Supabase Session Pooler configuration | Complete locally |
-| ETL framework | Mostly complete |
-| Pedestrian data pipeline | Implemented |
-| Development/construction pipeline | Implemented |
-| FastAPI backend architecture | Complete |
-| Core REST APIs | Complete |
-| User preferences API | Complete |
-| CBD status API | Complete |
-| Route API contract | Complete |
-| Route forecast API contract | Complete |
-| Quiet-spaces API contract | Complete |
-| Saved-route read/create/delete APIs | Complete |
-| Backend documentation | Complete |
-| Frontend CORS configuration | Implemented |
-| Backend cloud deployment | In progress |
-| Frontend integration | Route map and pedestrian markers implemented; remaining pages in progress |
-| Dynamic route generation | Implemented with Google Routes; database persistence pending |
-| Sensory scoring engine | Pedestrian crowd scoring implemented; construction and lighting pending |
-| Route recommendation engine | Crowd-aware ranking implemented; preference weighting pending |
-| Refuge data population | Not started / pending data source |
-| Route-to-refuge spatial matching | Not completed |
-| ETL scheduling | Not started |
-| Production monitoring | Not started |
+| `DATABASE_URL` | Full PostgreSQL connection URL **(or use the `DB_*` set below)** |
+| `DB_USER` / `DB_PASSWORD` / `DB_HOST` / `DB_PORT` / `DB_NAME` | Supabase Session Pooler settings |
+| `MAPBOX_ACCESS_TOKEN` | **Server-side** Mapbox token for the Directions API (route computation) |
+| `FRONTEND_ORIGIN` | Comma-separated CORS origins, no trailing slashes |
+
+### Frontend (`senselens-frontend/.env`)
+
+| Variable | Purpose |
+|---|---|
+| `VITE_API_BASE` | Backend base URL, no trailing slash |
+| `VITE_MAPBOX_ACCESS_TOKEN` | Mapbox token for map rendering + address search |
+
+> **Two different Mapbox tokens by role:** the backend's `MAPBOX_ACCESS_TOKEN`
+> (Directions API) is server-side and must never be exposed through a `VITE_*`
+> variable. The frontend's `VITE_MAPBOX_ACCESS_TOKEN` is public by design (it
+> ships in the browser bundle) and is scoped to map display and search.
+
+Never commit `.env`. Never expose database credentials to the frontend.
 
 ---
 
-# Next Development Phase
+## Cloud deployment
 
-The next phase focuses on completing the end-to-end application flow.
+### Frontend — Render (static site)
 
-## 1. Verify FastAPI Cloud Deployment
+Deploys from `senselens-frontend/` on `main`. [`render.yaml`](render.yaml) at the
+repo root declares the build command, publish path, SPA rewrite, and required env
+vars so the deploy is reproducible by anyone on the team.
 
-Confirm:
+- Build: `npm install && npm run build` · Publish: `dist`
+- SPA rewrite: `/* → /index.html` (so `/map`, `/refuges`, … don't 404)
+- Secrets (set in Render): `VITE_API_BASE`, `VITE_MAPBOX_ACCESS_TOKEN`
 
-```text
-GET /
-GET /health
-GET /docs
-```
+### Backend — FastAPI Cloud
 
-from the public FastAPI Cloud URL.
+Auto-deploys from GitHub `main`. Configure secrets in the FastAPI Cloud
+dashboard: the database connection (`DATABASE_URL` or `DB_*`),
+`MAPBOX_ACCESS_TOKEN`, and `FRONTEND_ORIGIN`. Local `.env` changes do **not**
+propagate to the cloud — set them in the platform.
 
-Then verify database-backed endpoints.
-
----
-
-## 2. Verify Frontend-to-Backend Communication
-
-Dynamic walking-route generation now uses Google Routes when `/routes` is
-called with a destination. The API returns distance, duration, directions,
-and an encoded polyline for the Vue map.
-
-The deployed Vue application should call:
-
-```text
-Vue / Render
-      │
-      ▼
-FastAPI Cloud
-```
-
+A deploy is healthy when `/health` and `/docs` respond publicly, Supabase
+connectivity works from the cloud, and the Render frontend can reach the backend
 without CORS errors.
 
-The frontend team can then configure its API base URL to point to the deployed backend.
-
 ---
 
-## 3. Dynamic Route Generation
+## Testing
 
-The frontend/integration work will provide or request candidate walking routes.
+Backend tests use `pytest`:
 
-Conceptually:
-
-```text
-Origin + Destination
-        │
-        ▼
-Mapping / Routing Provider
-        │
-        ▼
-Candidate Walking Routes
-        │
-        ▼
-SenseLens Backend
+```bash
+.venv/bin/python -m pytest tests/ -q
 ```
 
-The remaining work is to persist generated route geometry and replace the
-temporary in-memory route-detail cache with durable storage.
+Coverage includes route generation & ranking, the interpolated percentile
+scorer, geometry/sensor matching, the Mapbox alternative-synthesis (HTTP mocked),
+the routes API contract, and the forecast service.
 
 ---
 
-## 4. Associate Routes with Environmental Data
+## Git & branching workflow
 
-Candidate routes will eventually be evaluated against:
+- **`main`** — full stack (backend `app/`, `etl/`, frontend `senselens-frontend/`).
+  Backend and the FastAPI Cloud + Render deployments track this branch.
+- **`wenlu`** — the actively-maintained **frontend** branch; it contains no
+  backend directory.
 
-```text
-Pedestrian Sensors
-        +
-Historical Pedestrian Activity
-        +
-Construction / Development
-        +
-Street Lighting
-        +
-Verified Refuge Locations
-        ↓
-Route Environmental Profile
-```
+Because the two branches carry different subsets of the tree, the convention is:
 
-The existing `RouteSensor` relationship can support association between routes and pedestrian sensors.
+- **Frontend changes** land on `wenlu` and are cherry-picked into `main` (and
+  vice-versa) so both stay in sync.
+- **Backend changes** are `main`-only (`wenlu` has no `app/`), so they need no
+  cherry-pick.
+
+Yu Zhang's `fastapi-google-map`, `google-map-integration`, and
+`forecast-model-backend` branches hold earlier integration work and are not part
+of the current deploy path.
 
 ---
 
-## 5. Sensory Scoring
+## Development principles
 
-Future route scoring will consider factors such as:
-
-- Pedestrian density
-- Construction exposure
-- Lighting comfort
-- Other validated sensory/environmental indicators
-
-These can be represented through the existing `SensoryScore` data model.
-
----
-
-## 6. Preference-Aware Route Recommendation
-
-User preferences will eventually influence candidate-route ranking.
-
-Conceptually:
-
-```text
-Candidate Route
-      +
-Environmental Conditions
-      +
-User Preferences
-      │
-      ▼
-Sensory Scoring
-      │
-      ▼
-Route Ranking
-      │
-      ▼
-Recommended Route
-```
-
-For example, a user with high crowd sensitivity may prefer a slightly longer walking route with lower expected pedestrian activity.
-
-The exact scoring algorithm still needs to be designed, validated, and documented.
+- **No fabricated data.** If the underlying data can't answer, the API returns an
+  empty or "insufficient data" response rather than inventing values.
+- **Separation of responsibilities.** ETL prepares external data · Supabase
+  stores it · FastAPI routers handle HTTP while services hold business logic and
+  SQL · Vue renders the UI · Mapbox handles map display and route geometry.
+- **Stable API contracts.** Frontend-facing contracts are kept stable while the
+  internals evolve.
+- **Secure configuration.** Secrets live in environment variables, never in the
+  repo; database credentials stay server-side only; rotate anything exposed.
 
 ---
 
-## 7. Refuge Integration
+## Team
 
-The refuge API contract exists, but verified refuge-location data still needs to be identified and populated.
-
-Potential categories may include suitable:
-
-- Parks
-- Libraries
-- Community spaces
-- Other verified low-stimulation locations
-
-Any refuge dataset or curation methodology should be documented.
-
-SenseLens should not fabricate refuge locations.
-
----
-
-## 8. ETL Automation
-
-After the main application flow is stable, ETL pipelines can be scheduled automatically.
-
-The target production flow is:
-
-```text
-Scheduled Job
-      │
-      ▼
-Melbourne Open Data
-      │
-      ▼
-ETL Pipeline
-      │
-      ▼
-Supabase
-      │
-      ▼
-FastAPI
-      │
-      ▼
-Frontend
-```
-
-This will keep environmental data updated without requiring manual execution.
-
----
-
-# Development Principles
-
-## No Fabricated Data
-
-If underlying data is unavailable, the backend returns an empty or unavailable response instead of inventing values.
-
----
-
-## Separation of Responsibilities
-
-```text
-ETL
-→ retrieves and prepares external data
-
-Supabase
-→ stores shared application data
-
-FastAPI
-→ provides backend business logic and REST APIs
-
-Vue
-→ provides the user interface
-
-Mapping Integration
-→ handles map display and candidate route generation
-```
-
----
-
-## Secure Configuration
-
-Secrets are stored using environment variables rather than being hard-coded in the repository.
-
----
-
-## Stable API Contracts
-
-Where possible, frontend-facing API contracts are established before more advanced internal functionality is implemented.
-
-For example:
-
-```text
-GET /routes/{route_id}/forecast
-```
-
-can remain stable while the internal implementation evolves from the current sensory-state retrieval to a future predictive model.
-
----
-
-# Target Architecture
-
-The intended final architecture is:
-
-```text
-              City of Melbourne Open Data
-                         │
-                         ▼
-                 Scheduled ETL Jobs
-                         │
-                         ▼
-                 Supabase PostgreSQL
-                         │
-                         ▼
-                  FastAPI Backend
-                         ▲
-                         │
-                  Candidate Routes
-                         │
-                 Mapping Provider
-                         │
-                         ▼
-                 Sensory Scoring
-                         │
-                         ▼
-               Route Recommendation
-                         │
-                         ▼
-                   Vue Frontend
-                         │
-                         ▼
-                 Interactive Map
-```
-
----
-
-# Security Notes
-
-- Never commit `.env`.
-- Never commit database passwords.
-- Never expose PostgreSQL credentials to the frontend.
-- Database credentials belong only in the backend environment.
-- The frontend should communicate with FastAPI rather than directly connecting to PostgreSQL.
-- Production secrets should be configured through the hosting provider.
-- Database access should follow least-privilege principles.
-- Rotate credentials if they are accidentally exposed.
-
----
-
-# Team
-
-**SenseLens**
-
-Monash University  
-Industry Experience Onboarding Project  - TEAM Beyond-KPI
-2026
+**SenseLens** — Monash University, Industry Experience Onboarding Project,
+Team Beyond-KPI, 2026.
