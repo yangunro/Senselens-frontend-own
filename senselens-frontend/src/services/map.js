@@ -129,6 +129,8 @@ export async function getQuietSpaces(routeId) {
         label: space.name,
         lat: space.lat,
         lng: space.lng,
+        category: space.category,
+        distanceFromRouteM: space.distanceFromRouteM,
       }));
     },
     async () => {

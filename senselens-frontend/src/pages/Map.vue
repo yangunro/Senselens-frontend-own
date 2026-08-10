@@ -9,6 +9,7 @@ import ProgressBar from "../components/ProgressBar.vue";
 import { getRouteDetail, getQuietSpaces, getSensoryAlert, getForecast, getPedestrianCounts } from "../services/map";
 import { getRouteOptions } from "../services/routes";
 import { watchCurrentLocation, getAccurateCurrentLocation } from "../services/geolocation";
+import { openExternalNavigation } from "../services/externalNavigation";
 import { usePreferences, toggleValue } from "../composables/usePreferences";
 
 const route = useRoute();
@@ -277,6 +278,15 @@ async function loadMap() {
   forecast.value = sensoryForecast;
   loading.value = false;
   renderMapLayer();
+
+  // Lets the Refuges page know which route is currently active, so it can
+  // flag refuges that are actually on the way instead of just nearby.
+  try {
+    sessionStorage.setItem("lastRouteId", routeId);
+  } catch {
+    // Storage unavailable (private browsing etc) — refuges just won't get
+    // the "on the way" flag this session, not worth failing the route over.
+  }
 }
 
 async function loadPedestrianCounts() {
@@ -421,6 +431,15 @@ function reroute() {
             {{ factor.label }}
           </span>
         </div>
+
+        <button
+          type="button"
+          class="navigate-button"
+          @click="openExternalNavigation(activeRoute.destination)"
+        >
+          <Icon name="navigation" :size="15" />
+          Navigate with my maps app
+        </button>
       </section>
     </div>
   </PageShell>
@@ -577,6 +596,30 @@ function reroute() {
   color: var(--color-text-muted);
   font-size: 11.5px;
   font-weight: 600;
+}
+
+.navigate-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  width: 100%;
+  margin-top: 16px;
+  padding: 13px 16px;
+
+  background: var(--color-primary);
+  border: none;
+  border-radius: var(--radius-md);
+
+  color: white;
+  font-size: 13.5px;
+  font-weight: 700;
+  transition: background 0.15s ease;
+}
+
+.navigate-button:hover {
+  background: var(--color-primary-dark);
 }
 
 .map-area {
