@@ -9,7 +9,6 @@ import { getRefuges } from "../services/refuges";
 import { getQuietSpaces } from "../services/map";
 import { getAccurateCurrentLocation } from "../services/geolocation";
 import { FALLBACK_ORIGIN } from "../services/routes";
-import { openExternalNavigation } from "../services/externalNavigation";
 
 const router = useRouter();
 const refuges = ref([]);
@@ -143,41 +142,35 @@ import("../pages/Map.vue");
     </div>
 
     <div v-else-if="filteredRefuges.length" class="refuge-list">
-      <div v-for="refuge in filteredRefuges" :key="refuge.id" class="refuge-card">
-        <button type="button" class="refuge-main" @click="navigateTo(refuge)">
-          <div class="refuge-icon">
-            <Icon :name="refuge.icon" :size="20" />
+      <button
+        v-for="refuge in filteredRefuges"
+        :key="refuge.id"
+        type="button"
+        class="refuge-card"
+        @click="navigateTo(refuge)"
+      >
+        <div class="refuge-icon">
+          <Icon :name="refuge.icon" :size="20" />
+        </div>
+
+        <div class="refuge-body">
+          <div class="refuge-top">
+            <h2>{{ refuge.name }}</h2>
+            <span v-if="refuge.onRoute" class="distance on-route">
+              On the way · {{ formatDistance(refuge.distanceFromRouteM) }}
+            </span>
+            <span v-else-if="refuge.distanceM != null" class="distance">
+              {{ formatDistance(refuge.distanceM) }}
+            </span>
           </div>
 
-          <div class="refuge-body">
-            <div class="refuge-top">
-              <h2>{{ refuge.name }}</h2>
-              <span v-if="refuge.onRoute" class="distance on-route">
-                On the way · {{ formatDistance(refuge.distanceFromRouteM) }}
-              </span>
-              <span v-else-if="refuge.distanceM != null" class="distance">
-                {{ formatDistance(refuge.distanceM) }}
-              </span>
-            </div>
-
-            <span class="refuge-type">{{ refuge.type }}</span>
-            <p v-if="refuge.note">{{ refuge.note }}</p>
-            <p class="refuge-disclaimer">
-              Identified from City of Melbourne open data. Check current access before relying on this location.
-            </p>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          class="directions-button"
-          aria-label="Get walking directions"
-          @click.stop="openExternalNavigation(refuge)"
-        >
-          <Icon name="navigation" :size="15" />
-          Directions
-        </button>
-      </div>
+          <span class="refuge-type">{{ refuge.type }}</span>
+          <p v-if="refuge.note">{{ refuge.note }}</p>
+          <p class="refuge-disclaimer">
+            Identified from City of Melbourne open data. Check current access before relying on this location.
+          </p>
+        </div>
+      </button>
     </div>
 
     <p v-else class="empty-state">No refuges in this category yet.</p>
@@ -227,7 +220,11 @@ import("../pages/Map.vue");
 
 .refuge-card {
   display: flex;
-  flex-direction: column;
+  gap: 13px;
+
+  width: 100%;
+  padding: 16px;
+  text-align: left;
 
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -238,33 +235,6 @@ import("../pages/Map.vue");
 
 .refuge-card:hover {
   border-color: #cfe3da;
-}
-
-.refuge-main {
-  display: flex;
-  gap: 13px;
-
-  padding: 16px;
-  text-align: left;
-}
-
-.directions-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-
-  padding: 11px 16px;
-
-  border-top: 1px solid var(--color-border);
-
-  color: var(--color-primary);
-  font-size: 12.5px;
-  font-weight: 700;
-}
-
-.directions-button:hover {
-  background: var(--color-surface-muted);
 }
 
 .refuge-icon {
