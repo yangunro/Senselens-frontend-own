@@ -33,6 +33,35 @@ const customOriginPoint = computed(() => {
 });
 
 const routeOptions = ref([]);
+
+// Comparing two numbers on their own badges ("40th percentile" vs "80th
+// percentile") takes real work to parse — a plain-language tradeoff against
+// the recommended option is faster to read at a glance. Only shown on
+// alternatives, and only when both figures are real numbers, never guessed.
+const recommendedOption = computed(() => routeOptions.value.find((option) => option.recommended));
+
+function tradeoffAgainstRecommended(option) {
+  const base = recommendedOption.value;
+  if (!base || option.id === base.id) return null;
+  if (option.durationMinutes == null || base.durationMinutes == null) return null;
+
+  const minutesDelta = option.durationMinutes - base.durationMinutes;
+  const timePhrase =
+    minutesDelta === 0
+      ? "same duration"
+      : `${Math.abs(minutesDelta)} min ${minutesDelta > 0 ? "longer" : "quicker"}`;
+
+  if (option.sensoryScore == null || base.sensoryScore == null) return timePhrase;
+
+  const scoreDelta = option.sensoryScore - base.sensoryScore;
+  if (Math.abs(scoreDelta) < 5) return `${timePhrase}, similar crowd exposure`;
+
+  const crowdPhrase = scoreDelta > 0 ? "more crowded" : "less crowded";
+  const magnitude = Math.abs(scoreDelta) >= 25 ? "significantly " : "";
+
+  return `${timePhrase}, ${magnitude}${crowdPhrase}`;
+}
+
 const selectedId = ref(null);
 const loading = ref(true);
 const locationAccuracy = ref(null);
@@ -198,6 +227,10 @@ function startCalmRoute() {
 
         <h2>{{ option.name }}</h2>
         <p>{{ option.description }}</p>
+
+        <p v-if="tradeoffAgainstRecommended(option)" class="tradeoff-note">
+          vs. recommended: {{ tradeoffAgainstRecommended(option) }}
+        </p>
 
         <div v-if="option.factors?.length" class="factor-chips">
           <span v-for="factor in option.factors" :key="factor.label" class="factor-chip">
@@ -405,6 +438,14 @@ function startCalmRoute() {
   color: var(--color-text-muted);
   font-size: 13px;
   line-height: 1.55;
+}
+
+.tradeoff-note {
+  margin: 8px 0 0;
+
+  color: var(--color-primary-dark);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .factor-chips {

@@ -18,6 +18,7 @@ import {
 import { FALLBACK_ORIGIN, getRouteOptions } from "../services/routes";
 import { watchCurrentLocation, getAccurateCurrentLocation } from "../services/geolocation";
 import { openExternalNavigation } from "../services/externalNavigation";
+import { estimateRouteProgress } from "../services/routeProgress";
 import { usePreferences, toggleValue } from "../composables/usePreferences";
 
 const route = useRoute();
@@ -25,6 +26,7 @@ const router = useRouter();
 const preferences = usePreferences();
 
 const activeRoute = ref(null);
+const liveProgress = ref(null);
 const quietSpaces = ref([]);
 const alert = ref(null);
 const forecast = ref(null);
@@ -178,6 +180,10 @@ function renderSensorMarkers() {
 // Classic "blue dot" — distinct from the green route-start marker so it
 // reads as "you, right now" rather than "where this route begins".
 function renderCurrentLocationMarker(position) {
+  if (activeRoute.value) {
+    liveProgress.value = estimateRouteProgress(position, activeRoute.value);
+  }
+
   if (!map) return;
   currentLocationMarker?.remove();
   const el = createCircleElement(14, "#4285f4");
@@ -276,6 +282,7 @@ const activeBanner = computed(() => {
 function clearRouteView() {
   loading.value = false;
   activeRoute.value = null;
+  liveProgress.value = null;
   quietSpaces.value = [];
   alert.value = null;
   forecast.value = null;
@@ -330,6 +337,7 @@ async function loadMap() {
     getForecast(routeId),
   ]);
   activeRoute.value = routeDetail;
+  liveProgress.value = null;
   quietSpaces.value = spaces;
   alert.value = sensoryAlert;
   forecast.value = sensoryForecast;
@@ -477,10 +485,20 @@ function reroute() {
         </div>
 
         <div class="progress-row">
-          <ProgressBar :value="activeRoute.progress" />
+          <ProgressBar :value="liveProgress?.progress ?? activeRoute.progress" />
           <span class="progress-label">
             <Icon name="check" :size="13" />
-            {{ activeRoute.progress }}% of the way there
+            {{ liveProgress?.progress ?? activeRoute.progress }}% of the way there
+          </span>
+        </div>
+
+        <div v-if="liveProgress?.currentStep?.instruction" class="next-step-row">
+          <Icon name="navigation" :size="15" />
+          <span>
+            {{ liveProgress.currentStep.instruction }}
+            <template v-if="liveProgress.currentStep.remainingInStepM">
+              · in {{ liveProgress.currentStep.remainingInStepM }} m
+            </template>
           </span>
         </div>
 
@@ -672,6 +690,27 @@ function reroute() {
   color: var(--color-text-faint);
   font-size: 10.5px;
   font-style: italic;
+}
+
+.next-step-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+
+  margin-top: 14px;
+  padding: 11px 14px;
+
+  background: var(--color-primary-soft);
+  border-radius: var(--radius-sm);
+
+  color: var(--color-primary-dark);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.next-step-row :deep(.sl-icon) {
+  flex-shrink: 0;
 }
 
 .transit-row {

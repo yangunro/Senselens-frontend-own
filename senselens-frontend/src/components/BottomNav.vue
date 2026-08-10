@@ -7,6 +7,7 @@ const navItems = [
   { to: "/", label: "Home", icon: "home" },
   { to: "/map", label: "Map", icon: "map" },
   { to: "/refuges", label: "Refuges", icon: "refuge" },
+  { to: "/how-it-works", label: "How it works", icon: "info" },
 ];
 </script>
 
@@ -37,7 +38,7 @@ const navItems = [
   z-index: 10;
 
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
 
   height: 80px;
   padding: 10px 14px 14px;
