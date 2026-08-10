@@ -164,6 +164,54 @@ export async function getPedestrianCounts() {
   );
 }
 
+const mockPedestrianForecast = {
+  horizonHours: 3,
+  forecasts: [
+    {
+      hoursAhead: 1,
+      sensors: [
+        { sensorId: 1, name: "Flinders Street Station", lat: -37.8183, lng: 144.9671, level: "medium", predictedCountPerMinute: 15 },
+        { sensorId: 2, name: "Melbourne Central", lat: -37.811, lng: 144.9643, level: "high", predictedCountPerMinute: 28 },
+      ],
+    },
+    {
+      hoursAhead: 2,
+      sensors: [
+        { sensorId: 1, name: "Flinders Street Station", lat: -37.8183, lng: 144.9671, level: "low", predictedCountPerMinute: 8 },
+        { sensorId: 2, name: "Melbourne Central", lat: -37.811, lng: 144.9643, level: "medium", predictedCountPerMinute: 18 },
+      ],
+    },
+    {
+      hoursAhead: 3,
+      sensors: [
+        { sensorId: 1, name: "Flinders Street Station", lat: -37.8183, lng: 144.9671, level: "low", predictedCountPerMinute: 6 },
+        { sensorId: 2, name: "Melbourne Central", lat: -37.811, lng: 144.9643, level: "low", predictedCountPerMinute: 10 },
+      ],
+    },
+  ],
+  alerts: [
+    {
+      level: "high",
+      message: "Melbourne Central may reach 28 pedestrians per minute in about 1 hour(s).",
+      hoursAhead: 1,
+    },
+  ],
+};
+
+// Map-wide (not route-specific) crowd predictions for every reporting
+// sensor, 1-3 hours ahead — powers the map's forecast time-toggle and its
+// "high crowd predicted" alerts. Always requested at the full 3-hour horizon
+// so the toggle can switch hours locally without re-fetching.
+export async function getPedestrianForecast() {
+  return withApiFallback(
+    () => apiGet("/pedestrian-forecasts?horizonHours=3"),
+    async () => {
+      await delay(500);
+      return mockPedestrianForecast;
+    }
+  );
+}
+
 export async function getForecast(routeId) {
   return withApiFallback(
     async () => {
