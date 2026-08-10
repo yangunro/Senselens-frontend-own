@@ -334,8 +334,8 @@ function reroute() {
           <Icon class="forecast-icon" name="trendingUp" :size="18" />
 
           <div>
-            <strong>Likely busy in {{ forecast.etaMinutesStart }}–{{ forecast.etaMinutesEnd }} min: {{ forecast.area }}</strong>
-            <p>{{ forecast.message }}</p>
+            <strong>{{ forecast.levelLabel }} expected in the next hour</strong>
+            <p>{{ forecast.basis }}</p>
             <p class="forecast-disclaimer">Estimate based on available pedestrian data — actual conditions may vary.</p>
           </div>
         </div>

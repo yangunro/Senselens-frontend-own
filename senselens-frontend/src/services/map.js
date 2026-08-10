@@ -56,21 +56,19 @@ const mockRouteDetails = {
   },
 };
 
-// Predictive alerts (US 2.2): areas forecast to become overwhelming within the next hour,
-// derived from historical pedestrian trend data on the backend.
+// Predictive alerts (US 2.2): the route's overall crowd level forecast one
+// hour from now, derived from historical pedestrian trend data on the backend.
 const mockForecasts = {
   "quiet-flinders": null,
   "balanced-collins": {
-    area: "Collins St intersection",
-    etaMinutesStart: 25,
-    etaMinutesEnd: 40,
-    message: "Pedestrian traffic is trending up here and may get busier within the hour, based on historical patterns.",
+    levelLabel: "MEDIUM SENSORY",
+    level: "medium",
+    basis: "Pedestrian traffic near Collins St intersection is trending up and may get busier within the hour, based on historical patterns.",
   },
   "direct-bourke": {
-    area: "Bourke St Mall",
-    etaMinutesStart: 15,
-    etaMinutesEnd: 30,
-    message: "Crowd levels are forecast to peak here within the hour, based on historical patterns.",
+    levelLabel: "HIGH SENSORY",
+    level: "high",
+    basis: "Crowd levels near Bourke St Mall are forecast to peak within the hour, based on historical patterns.",
   },
 };
 
@@ -168,9 +166,16 @@ export async function getPedestrianCounts() {
 
 export async function getForecast(routeId) {
   return withApiFallback(
-    // Backend 404s instead of returning null when there's no forecast for
-    // this route — that's a valid "nothing to report" state, not a failure.
-    () => apiGet(`/routes/${routeId}/forecast`, { notFoundIsNull: true }),
+    async () => {
+      // Backend 404s instead of returning null when there's no forecast for
+      // this route — that's a valid "nothing to report" state, not a failure.
+      const real = await apiGet(`/routes/${routeId}/forecast`, { notFoundIsNull: true });
+      if (!real) return null;
+      // Real shape is a single next-hour crowd-level prediction for the whole
+      // route (level/basis) — not the area+ETA-range the UI was originally
+      // written for.
+      return { levelLabel: real.sensoryIndicator, level: real.level, basis: real.basis };
+    },
     async () => {
       await delay(550);
       return mockForecasts[routeId] ?? null;
