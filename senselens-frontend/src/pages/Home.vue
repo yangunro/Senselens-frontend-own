@@ -98,7 +98,7 @@ async function findCalmRoute() {
               <input
                 v-model="origin.query.value"
                 type="text"
-                placeholder="Starting point (optional — defaults to your location)"
+                placeholder="Starting point (optional, defaults to your location)"
                 autocomplete="off"
                 @input="origin.onInput"
                 @keyup.enter="findCalmRoute"

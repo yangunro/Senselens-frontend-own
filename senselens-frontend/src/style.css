@@ -1,6 +1,12 @@
 @import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800&display=swap");
 
 :root {
+  /* The app only has one theme — pin it explicitly so browsers/OSes with
+     "auto dark mode for web content" (common on Android Chrome) don't
+     apply their own heuristic recoloring on top of these light values,
+     which produces inconsistent, half-inverted card colors. */
+  color-scheme: light;
+
   /* Calm, warm neutral surface */
   --color-surface: #fffdf9;
   --color-surface-muted: #efeade;

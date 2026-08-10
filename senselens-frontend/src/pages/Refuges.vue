@@ -163,7 +163,7 @@ import("../pages/Map.vue");
             <span class="refuge-type">{{ refuge.type }}</span>
             <p v-if="refuge.note">{{ refuge.note }}</p>
             <p class="refuge-disclaimer">
-              Identified from City of Melbourne open data — check current access before relying on this location.
+              Identified from City of Melbourne open data. Check current access before relying on this location.
             </p>
           </div>
         </button>
