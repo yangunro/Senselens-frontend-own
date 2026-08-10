@@ -54,7 +54,12 @@ const mockRouteOptions = [
 // percentile against live pedestrian sensors) when given real coordinates,
 // vs. just a destination string. origin defaults to Flinders Street Station
 // when real geolocation isn't available.
-export async function getRouteOptions(destination, destinationPoint, origin = FALLBACK_ORIGIN) {
+export async function getRouteOptions(
+  destination,
+  destinationPoint,
+  origin = FALLBACK_ORIGIN,
+  { avoidConstruction = false } = {}
+) {
   // No backend configured at all (local dev without .env) — mock is the only
   // option. Once a backend is configured, a failed request throws instead of
   // silently swapping in mock data, so a genuine outage shows an error state
@@ -70,6 +75,9 @@ export async function getRouteOptions(destination, destinationPoint, origin = FA
     params.set("originLng", origin.lng);
     params.set("destinationLat", destinationPoint.lat);
     params.set("destinationLng", destinationPoint.lng);
+  }
+  if (avoidConstruction) {
+    params.set("avoidConstruction", "true");
   }
 
   return apiGet(`/routes?${params.toString()}`);

@@ -34,6 +34,12 @@ const router = createRouter({
       meta: { title: "Sensory refuges - SenseLens" },
     },
     {
+      path: "/saved-routes",
+      name: "saved-routes",
+      component: () => import("../pages/SavedRoutes.vue"),
+      meta: { title: "Saved routes - SenseLens" },
+    },
+    {
       path: "/how-it-works",
       name: "how-it-works",
       component: () => import("../pages/HowItWorks.vue"),
