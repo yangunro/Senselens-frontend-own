@@ -36,7 +36,7 @@ def get_routes(
     avoid_construction=False,
 ):
     """
-    Generate live Google walking routes when a destination is supplied.
+    Generate live Mapbox walking routes when a destination is supplied.
     Without a destination, preserve the existing stored-route API.
     """
 
@@ -108,21 +108,46 @@ def get_routes(
             )
             for route in routes
         ]
-        routes.sort(
-            key=lambda route: (
-                # Only takes priority over crowd/duration when the user has
-                # opted in via their "avoid construction zones" preference —
-                # otherwise a route isn't penalised for something the rider
-                # never asked to avoid.
-                avoid_construction and route["hasActiveConstruction"],
-                route["sensoryScore"] is None,
-                (
-                    route["sensoryScore"]
-                    if route["sensoryScore"] is not None
-                    else 101
-                ),
+        # When the user opts into avoiding construction, treat each active
+        # site a route passes as added sensory burden — a penalty folded into
+        # the crowd score for ranking only (the displayed sensoryScore stays
+        # the pure crowd percentile). This pulls the recommendation toward
+        # routes with fewer sites (not just any fully-clear one, which barely
+        # exists in a CBD full of works) without letting one construction site
+        # override a genuinely much calmer path. Ranking is untouched for
+        # users who never opted in.
+        construction_penalty_per_site = 8 if avoid_construction else 0
+
+        def _route_sort_key(route):
+            score = route["sensoryScore"]
+            has_score = score is not None
+            penalty = construction_penalty_per_site * route["constructionSitesNearby"]
+            return (
+                # Routes with no nearby sensor to score (insufficient data)
+                # sink below any genuinely-scored route rather than being
+                # recommended on an absent number.
+                not has_score,
+                (score + penalty) if has_score else float("inf"),
                 route["durationMinutes"],
             )
+
+        routes.sort(key=_route_sort_key)
+
+        # Whether the top route is recommended partly because it passes less
+        # construction than the alternatives — lets us say so outright on the
+        # card, so the avoid-construction preference is a visible behaviour
+        # rather than a silent reordering the user can't see happening.
+        alternative_site_counts = [
+            route["constructionSitesNearby"] for route in routes[1:]
+        ]
+        recommended_sites = routes[0]["constructionSitesNearby"] if routes else 0
+        recommended_reduces_construction = (
+            avoid_construction
+            and alternative_site_counts
+            and recommended_sites < max(alternative_site_counts)
+        )
+        recommended_fully_avoids_construction = (
+            recommended_reduces_construction and recommended_sites == 0
         )
 
         for index, route in enumerate(routes):
@@ -141,17 +166,21 @@ def get_routes(
                     if is_recommended and has_score and has_alternatives
                     else "ONLY AVAILABLE ROUTE"
                     if is_recommended and not has_alternatives
-                    else "GOOGLE RECOMMENDED"
+                    else "FASTEST ROUTE"
                     if is_recommended
                     else "ALTERNATIVE ROUTE"
                 ),
                 "name": f"{route_name} {index + 1}",
                 "footnote": (
-                    "Lowest measured crowd exposure"
+                    "Avoids active construction"
+                    if is_recommended and recommended_fully_avoids_construction
+                    else "Fewer construction zones"
+                    if is_recommended and recommended_reduces_construction
+                    else "Lowest measured crowd exposure"
                     if is_recommended and has_score and has_alternatives
                     else "Only available walking route"
                     if is_recommended and not has_alternatives
-                    else "Google recommended route"
+                    else "Shortest walking route"
                     if is_recommended
                     else ""
                 ),

@@ -1,4 +1,3 @@
-from bisect import bisect_right
 from math import cos, hypot, radians
 
 import polyline
@@ -299,9 +298,35 @@ def _percentile_score(value, reference_values):
         return None
 
     ordered = sorted(reference_values)
-    rank = bisect_right(ordered, value)
+    n = len(ordered)
 
-    return round(rank / len(ordered) * 100)
+    if n == 1:
+        return 0 if value <= ordered[0] else 100
+
+    if value <= ordered[0]:
+        return 0
+    if value >= ordered[-1]:
+        return 100
+
+    # Linear interpolation across the empirical distribution, not a plain
+    # step-rank. With only a handful of live sensors and a lumpy count
+    # distribution (e.g. [1,1,1,1,1,3,9]), a step-rank buckets every route
+    # whose exposure lands between two sparse readings into an identical
+    # percentile — flattening a route that only passes calm sensors to the
+    # same score as one passing the busiest. Interpolating between adjacent
+    # readings gives genuinely different routes genuinely different scores.
+    for index in range(n - 1):
+        lower = ordered[index]
+        upper = ordered[index + 1]
+        if lower <= value <= upper:
+            fractional_index = (
+                index
+                if upper == lower
+                else index + (value - lower) / (upper - lower)
+            )
+            return round(fractional_index / (n - 1) * 100)
+
+    return 100
 
 
 def _score_level(score):

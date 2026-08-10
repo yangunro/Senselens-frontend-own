@@ -6,7 +6,7 @@ from app.services.routes_service import create_route
 
 DEMO_USER_EMAIL = "abdullah@example.com"
 
-# Live routes are generated on the fly (Google Routes API) and only ever
+# Live routes are generated on the fly (Mapbox Directions API) and only ever
 # live in an in-memory cache — they're never rows in "Route", so there was
 # never a real RouteID to attach a SavedRoute to via the FK. "level" (the
 # route's own low/medium/high crowd rating) is the closest thing to a route

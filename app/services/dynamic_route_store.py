@@ -9,7 +9,7 @@ _lock = Lock()
 
 
 def save_dynamic_routes(routes):
-    """Keep recent Google route details available to follow-up API calls."""
+    """Keep recent Mapbox route details available to follow-up API calls."""
     with _lock:
         for route in routes:
             route_id = str(route["id"])

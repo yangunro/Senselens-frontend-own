@@ -6,6 +6,7 @@ from app.services.route_analysis_service import (
     analyse_route,
     decode_route,
     distance_to_route_metres,
+    _percentile_score,
 )
 
 
@@ -67,7 +68,10 @@ class RouteAnalysisServiceTests(unittest.TestCase):
 
         self.assertEqual(analysed["matchedSensorCount"], 1)
         self.assertEqual(analysed["nearbySensors"][0]["sensorId"], 1)
-        self.assertEqual(analysed["sensoryScore"], 33)
+        # The route's only nearby sensor (count 5) is the calmest of the three
+        # reference sensors [5, 20, 50], so it sits at the bottom of the
+        # interpolated distribution — the 0th percentile.
+        self.assertEqual(analysed["sensoryScore"], 0)
         self.assertEqual(analysed["level"], "low")
 
     def test_missing_nearby_sensor_is_insufficient_not_low(self):
@@ -91,6 +95,28 @@ class RouteAnalysisServiceTests(unittest.TestCase):
             analysed["levelLabel"],
             "INSUFFICIENT DATA",
         )
+
+    def test_percentile_interpolates_across_sparse_sensor_gaps(self):
+        # With only a handful of live sensors and a lumpy count distribution,
+        # a plain step-rank collapses every route whose exposure lands between
+        # two sparse readings into one identical percentile. Interpolation
+        # keeps genuinely different routes genuinely distinct.
+        reference = [1, 1, 1, 1, 1, 3, 9]
+
+        # Two routes with clearly different exposure must not tie.
+        calm = _percentile_score(1.0, reference)
+        busier = _percentile_score(2.2, reference)
+        self.assertLess(calm, busier)
+
+        # Bottom and top of the distribution anchor at 0 and 100.
+        self.assertEqual(_percentile_score(1.0, reference), 0)
+        self.assertEqual(_percentile_score(9.0, reference), 100)
+        self.assertEqual(_percentile_score(12.0, reference), 100)
+
+        # Degenerate inputs stay safe.
+        self.assertIsNone(_percentile_score(None, reference))
+        self.assertIsNone(_percentile_score(3, []))
+        self.assertEqual(_percentile_score(2, [5]), 0)
 
 
 if __name__ == "__main__":

@@ -41,9 +41,9 @@ class RoutesServiceTests(unittest.TestCase):
     def test_selected_destination_uses_coordinate_waypoint(self):
         with (
             patch(
-                "app.services.routes_service.get_google_routes",
+                "app.services.routes_service.get_mapbox_routes",
                 return_value=[],
-            ) as get_google_routes,
+            ) as get_mapbox_routes,
             patch(
                 "app.services.routes_service.get_latest_pedestrian_snapshot",
                 return_value=None,
@@ -57,7 +57,7 @@ class RoutesServiceTests(unittest.TestCase):
                 144.9628,
             )
 
-        get_google_routes.assert_called_once_with(
+        get_mapbox_routes.assert_called_once_with(
             {
                 "lat": -37.8136,
                 "lng": 144.9631,
@@ -77,7 +77,7 @@ class RoutesServiceTests(unittest.TestCase):
             (-37.8200, 144.9600),
             (-37.8200, 144.9700),
         ])
-        google_routes = [
+        mapbox_routes = [
             {
                 "id": "busy-route",
                 "distanceMeters": 800,
@@ -130,12 +130,22 @@ class RoutesServiceTests(unittest.TestCase):
 
         with (
             patch(
-                "app.services.routes_service.get_google_routes",
-                return_value=google_routes,
+                "app.services.routes_service.get_mapbox_routes",
+                return_value=mapbox_routes,
             ),
             patch(
                 "app.services.routes_service.get_latest_pedestrian_snapshot",
                 return_value=snapshot,
+            ),
+            # Keep this a hermetic unit test — don't let the construction /
+            # lighting enrichers reach out to the live database.
+            patch(
+                "app.services.routes_service.get_active_construction_sites",
+                return_value=[],
+            ),
+            patch(
+                "app.services.routes_service.get_lights_in_bounds",
+                return_value=[],
             ),
         ):
             summaries = get_routes("Collins Street")

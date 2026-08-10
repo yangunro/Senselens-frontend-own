@@ -44,6 +44,7 @@ class RoutesApiTests(unittest.TestCase):
             144.9631,
             None,
             None,
+            False,
         )
 
     def test_destination_coordinates_must_be_provided_together(self):
@@ -86,6 +87,7 @@ class RoutesApiTests(unittest.TestCase):
             144.9631,
             -37.8102,
             144.9628,
+            False,
         )
 
     def test_route_forecast_returns_service_unavailable_without_model(self):
