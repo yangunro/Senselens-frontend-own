@@ -201,7 +201,7 @@ a:focus-visible {
   }
 
   .app-container {
-    max-width: 1180px;
+    max-width: 1320px;
     min-height: min(100vh, 640px);
 
     /* .app-container keeps spanning at least this height so the nav

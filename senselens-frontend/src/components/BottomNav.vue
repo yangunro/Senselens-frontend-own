@@ -96,7 +96,7 @@ const navItems = [
   .bottom-nav {
     position: absolute;
     top: 0;
-    right: 0;
+    right: 70px;
     bottom: auto;
     left: auto;
 

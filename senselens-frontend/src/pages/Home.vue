@@ -452,8 +452,11 @@ async function findCalmRoute() {
 
   .hero-section {
     display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.7fr);
-    gap: 60px;
+    /* Same column template as .content-grid below, so the two right-column
+       cards (sensory forecast, plan ahead) share identical left/right edges
+       instead of drifting out of alignment. */
+    grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.6fr);
+    gap: 48px;
     align-items: end;
 
     margin-top: 75px;
@@ -474,6 +477,11 @@ async function findCalmRoute() {
     flex-direction: column;
     gap: 9px;
 
+    /* translateY instead of margin-top — this row is bottom-aligned
+       (align-items: end), so a margin here would grow the row itself and
+       drag the hero text on the left down with it. A transform shifts just
+       this card without affecting layout/row height. */
+    transform: translateY(50px);
     padding: 26px;
 
     background: var(--color-primary-soft);
@@ -511,14 +519,14 @@ async function findCalmRoute() {
 
   .content-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.55fr);
-    gap: 40px;
+    grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.6fr);
+    gap: 48px;
 
     margin-top: 42px;
   }
 
   .side-column {
-    margin-top: 0;
+    margin-top: 50px;
   }
 
   .info-card {
